@@ -1,0 +1,10 @@
+dash
+dash-bootstrap-components
+pandas
+pandas-ta
+numpy
+yfinance
+plotly
+gunicorn
+psycopg2-binary
+python-dotenv

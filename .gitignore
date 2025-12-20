@@ -1,0 +1,28 @@
+# Variables d'environnement (contient tes mots de passe !)
+.env
+
+# Python
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Anciens fichiers SQLite et JSON (plus utilisés)
+*.db
+user_assets.json
