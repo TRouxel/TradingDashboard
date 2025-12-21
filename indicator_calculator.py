@@ -47,15 +47,10 @@ def get_pattern_with_direction(candle_patterns_row):
 def calculate_all_indicators(df, config=None):
     """
     Calcule tous les indicateurs techniques et les ajoute au DataFrame.
-    
-    Args:
-        df: DataFrame avec colonnes 'Open', 'High', 'Low', 'Close', 'Volume'
-        config: Dictionnaire de configuration (optionnel, utilise les valeurs par défaut si None)
     """
     if config is None:
         config = get_default_config()
     
-    # Extraire les paramètres de la config
     rsi_cfg = config.get('rsi', RSI)
     stoch_cfg = config.get('stochastic', STOCHASTIC)
     ma_cfg = config.get('moving_averages', MOVING_AVERAGES)
@@ -77,7 +72,7 @@ def calculate_all_indicators(df, config=None):
     df.ta.macd(fast=macd_cfg['fast'], slow=macd_cfg['slow'], signal=macd_cfg['signal'], append=True)
     df.ta.adx(length=adx_cfg['period'], append=True)
     
-    # Renommer les colonnes dynamiquement
+    # Renommer les colonnes
     rename_map = {
         f'STOCHk_{stoch_cfg["k_period"]}_{stoch_cfg["d_period"]}_3': 'stochastic_k',
         f'STOCHd_{stoch_cfg["k_period"]}_{stoch_cfg["d_period"]}_3': 'stochastic_d',
@@ -95,18 +90,14 @@ def calculate_all_indicators(df, config=None):
         f'DMN_{adx_cfg["period"]}': 'di_minus',
     }
     
-    # Appliquer le renommage (ignorer les colonnes qui n'existent pas)
     existing_cols = {k: v for k, v in rename_map.items() if k in df.columns}
     df.rename(columns=existing_cols, inplace=True)
 
-    # === CALCUL DE LA TENDANCE ===
     df['trend'] = calculate_trend(df, config)
     
-    # === DÉTECTION DE DIVERGENCES RSI ===
     divergence_cfg = config.get('divergence', DIVERGENCE)
     df['rsi_divergence'] = detect_rsi_divergence(df, lookback=divergence_cfg['lookback_period'], config=config)
 
-    # === RECONNAISSANCE DE CHANDELIERS ===
     candle_patterns = df.ta.cdl_pattern(name="all")
     
     patterns_list = []
@@ -121,10 +112,9 @@ def calculate_all_indicators(df, config=None):
     df['pattern'] = patterns_list
     df['pattern_direction'] = directions_list
 
-    # === CALCUL DE LA RECOMMANDATION ===
     signal_timeframe = config.get('signal_timeframe', 1)
     df['recommendation'], df['conviction'] = zip(*df.apply(
-        lambda row: calculate_recommendation_v2(row, df, config, signal_timeframe), 
+        lambda row: calculate_recommendation_v3(row, df, config, signal_timeframe), 
         axis=1
     ))
 
@@ -161,7 +151,6 @@ def calculate_trend(df, config=None):
         weights = trend_cfg.get('weights', TREND['weights'])
         trend_score = 0
         
-        # Position du prix par rapport aux MAs
         if close > sma_20:
             trend_score += weights['price_vs_sma_short']
         else:
@@ -177,22 +166,18 @@ def calculate_trend(df, config=None):
         else:
             trend_score -= weights['price_vs_sma_long']
         
-        # Ordre des MAs
         if sma_20 > sma_50 > sma_200:
             trend_score += weights['ma_alignment']
         elif sma_20 < sma_50 < sma_200:
             trend_score -= weights['ma_alignment']
         
-        # Force de la tendance via ADX
         strong_trend = adx > adx_cfg['strong']
         
-        # Direction via DI+ / DI-
         if di_plus > di_minus:
             trend_score += weights['di_direction']
         else:
             trend_score -= weights['di_direction']
         
-        # Classification finale
         strong_threshold = trend_cfg.get('strong_threshold', 5)
         weak_threshold = trend_cfg.get('weak_threshold', 2)
         
@@ -233,11 +218,9 @@ def detect_rsi_divergence(df, lookback=14, config=None):
             if pd.isna(rsi) or pd.isna(rsi_prev):
                 continue
             
-            # Divergence haussière
             if price < price_prev and rsi > rsi_prev and rsi < rsi_low:
                 divergences[i] = 'bullish'
             
-            # Divergence baissière
             elif price > price_prev and rsi < rsi_prev and rsi > rsi_high:
                 divergences[i] = 'bearish'
                 
@@ -247,31 +230,28 @@ def detect_rsi_divergence(df, lookback=14, config=None):
     return divergences
 
 
-def calculate_recommendation_v2(row, df, config=None, signal_timeframe=1):
+def calculate_recommendation_v3(row, df, config=None, signal_timeframe=1):
     """
-    Logique de recommandation améliorée v2 avec support multi-timeframe.
+    VERSION 3 : Logique de recommandation ÉQUILIBRÉE entre achat et vente.
     
-    Args:
-        row: La ligne actuelle du DataFrame
-        df: Le DataFrame complet (pour l'analyse sur plusieurs jours)
-        config: Configuration des paramètres
-        signal_timeframe: Nombre de jours à analyser (1=daily, 5=weekly, etc.)
+    Changements majeurs :
+    - Suppression du filtre de tendance strict (permet signaux contre-tendance)
+    - Ajout de signaux de vente basés sur le momentum déclinant
+    - Détection des retournements de tendance
+    - Signaux plus réactifs aux conditions de surachat
     """
     if config is None:
         config = get_default_config()
     
-    # Vérifications de base
     if pd.isna(row.get('stochastic_k')) or pd.isna(row.get('rsi')):
         return 'Neutre', 0
     
-    # Extraire les paramètres de config
     rsi_cfg = config.get('rsi', RSI)
     stoch_cfg = config.get('stochastic', STOCHASTIC)
     weights = config.get('signal_weights', SIGNAL_WEIGHTS)
     decision = config.get('decision', DECISION)
     adx_cfg = config.get('adx', ADX)
     
-    # Valeurs actuelles
     stoch_k = row['stochastic_k']
     stoch_d = row['stochastic_d']
     rsi = row['rsi']
@@ -282,114 +262,165 @@ def calculate_recommendation_v2(row, df, config=None, signal_timeframe=1):
     pattern_dir = row.get('pattern_direction', 'neutral')
     rsi_div = row.get('rsi_divergence', 'none')
     adx = row.get('adx', 20)
+    di_plus = row.get('di_plus', 25)
+    di_minus = row.get('di_minus', 25)
     
     conviction_achat = 0
     conviction_vente = 0
     
     # === ANALYSE MULTI-TIMEFRAME ===
-    # Si signal_timeframe > 1, on agrège les signaux sur plusieurs jours
     if signal_timeframe > 1 and row.name in df.index:
         try:
             current_idx = df.index.get_loc(row.name)
             start_idx = max(0, current_idx - signal_timeframe + 1)
             window = df.iloc[start_idx:current_idx + 1]
             
-            # Moyennes sur la fenêtre
             rsi = window['rsi'].mean() if 'rsi' in window else rsi
             stoch_k = window['stochastic_k'].mean() if 'stochastic_k' in window else stoch_k
             stoch_d = window['stochastic_d'].mean() if 'stochastic_d' in window else stoch_d
             
-            # Pattern le plus significatif de la période
             patterns_in_window = window[window['pattern_direction'] != 'neutral']['pattern_direction']
             if len(patterns_in_window) > 0:
                 pattern_dir = patterns_in_window.mode().iloc[0] if len(patterns_in_window.mode()) > 0 else 'neutral'
             
-            # Divergence si présente dans la fenêtre
             divs_in_window = window[window['rsi_divergence'] != 'none']['rsi_divergence']
             if len(divs_in_window) > 0:
                 rsi_div = divs_in_window.iloc[-1]
                 
         except Exception:
-            pass  # En cas d'erreur, on utilise les valeurs du jour
+            pass
     
-    # === FILTRE DE TENDANCE ===
-    trend_filter_buy = trend not in ['strong_bearish', 'bearish']
-    trend_filter_sell = trend not in ['strong_bullish', 'bullish']
-    
-    trend_bonus_buy = weights.get('trend_bonus', 1) if trend in ['bullish', 'strong_bullish'] else 0
-    trend_bonus_sell = weights.get('trend_bonus', 1) if trend in ['bearish', 'strong_bearish'] else 0
-    
+    # ============================================
     # === SIGNAUX D'ACHAT ===
-    if trend_filter_buy:
-        # RSI en sortie de survente
-        if rsi_cfg['exit_oversold_min'] <= rsi <= rsi_cfg['exit_oversold_max'] and stoch_k > stoch_d:
+    # ============================================
+    
+    # 1. RSI en zone de survente ou sortie de survente
+    if rsi <= rsi_cfg['oversold']:
+        conviction_achat += weights.get('rsi_exit_oversold', 2) * 1.2  # Bonus survente extrême
+    elif rsi_cfg['exit_oversold_min'] <= rsi <= rsi_cfg['exit_oversold_max']:
+        if stoch_k > stoch_d:  # Confirmation stochastique
             conviction_achat += weights.get('rsi_exit_oversold', 2)
-        
-        # Stochastique : croisement haussier en zone basse
-        if stoch_k < stoch_cfg['oversold'] and stoch_k > stoch_d:
+        else:
+            conviction_achat += weights.get('rsi_exit_oversold', 2) * 0.5
+    
+    # 2. Stochastique : croisement haussier en zone basse
+    if stoch_k < stoch_cfg['oversold'] + 10:  # Zone basse élargie
+        if stoch_k > stoch_d:
             conviction_achat += weights.get('stoch_bullish_cross', 1)
-        
-        # MACD : croisement haussier
+    
+    # 3. MACD : signaux haussiers
+    if macd is not None and macd_signal is not None:
         if macd > macd_signal and macd_hist > 0:
             conviction_achat += weights.get('macd_bullish', 1)
-        elif not pd.isna(macd_hist) and macd_hist > 0:
+        elif macd_hist is not None and macd_hist > 0:
             conviction_achat += weights.get('macd_histogram_positive', 0.5)
-        
-        # Divergence RSI haussière
-        if rsi_div == 'bullish':
-            conviction_achat += weights.get('rsi_divergence', 2)
-        
-        # Pattern de chandelier haussier
-        if pattern_dir == 'bullish':
-            conviction_achat += weights.get('pattern_bullish', 1.5)
-        
-        # Bonus tendance
-        conviction_achat += trend_bonus_buy
     
+    # 4. Divergence RSI haussière
+    if rsi_div == 'bullish':
+        conviction_achat += weights.get('rsi_divergence', 2)
+    
+    # 5. Pattern de chandelier haussier
+    if pattern_dir == 'bullish':
+        conviction_achat += weights.get('pattern_bullish', 1.5)
+    
+    # 6. Bonus tendance haussière
+    if trend in ['bullish', 'strong_bullish']:
+        conviction_achat += weights.get('trend_bonus', 1)
+    
+    # 7. DI+ > DI- (momentum acheteur)
+    if di_plus > di_minus and adx > adx_cfg['weak']:
+        conviction_achat += 0.5
+    
+    # ============================================
     # === SIGNAUX DE VENTE ===
-    if trend_filter_sell:
-        # RSI en sortie de surachat
-        if rsi_cfg['exit_overbought_min'] <= rsi <= rsi_cfg['exit_overbought_max'] and stoch_k < stoch_d:
+    # ============================================
+    
+    # 1. RSI en zone de surachat ou sortie de surachat
+    if rsi >= rsi_cfg['overbought']:
+        conviction_vente += weights.get('rsi_exit_overbought', 2) * 1.2  # Bonus surachat extrême
+    elif rsi_cfg['exit_overbought_min'] <= rsi <= rsi_cfg['exit_overbought_max']:
+        if stoch_k < stoch_d:  # Confirmation stochastique
             conviction_vente += weights.get('rsi_exit_overbought', 2)
-        
-        # Stochastique : croisement baissier en zone haute
-        if stoch_k > stoch_cfg['overbought'] and stoch_k < stoch_d:
+        else:
+            conviction_vente += weights.get('rsi_exit_overbought', 2) * 0.5
+    
+    # 2. RSI déclinant depuis zone haute (NOUVEAU)
+    if rsi > 50 and rsi < rsi_cfg['exit_overbought_min']:
+        # RSI qui descend après avoir été haut = momentum qui faiblit
+        if stoch_k < stoch_d:
+            conviction_vente += 0.8
+    
+    # 3. Stochastique : croisement baissier en zone haute
+    if stoch_k > stoch_cfg['overbought'] - 10:  # Zone haute élargie
+        if stoch_k < stoch_d:
             conviction_vente += weights.get('stoch_bearish_cross', 1)
-        
-        # MACD : croisement baissier
+    
+    # 4. Stochastique en retournement (NOUVEAU)
+    if stoch_k > 50 and stoch_k < stoch_d:
+        conviction_vente += 0.5
+    
+    # 5. MACD : signaux baissiers
+    if macd is not None and macd_signal is not None:
         if macd < macd_signal and macd_hist < 0:
             conviction_vente += weights.get('macd_bearish', 1)
-        elif not pd.isna(macd_hist) and macd_hist < 0:
+        elif macd_hist is not None and macd_hist < 0:
             conviction_vente += weights.get('macd_histogram_negative', 0.5)
         
-        # Divergence RSI baissière
-        if rsi_div == 'bearish':
-            conviction_vente += weights.get('rsi_divergence', 2)
-        
-        # Pattern de chandelier baissier
-        if pattern_dir == 'bearish':
-            conviction_vente += weights.get('pattern_bearish', 1.5)
-        
-        # Bonus tendance
-        conviction_vente += trend_bonus_sell
+        # MACD qui passe sous zéro (NOUVEAU)
+        if macd < 0 and macd_signal < 0:
+            conviction_vente += 0.5
     
-    # === PÉNALITÉS ===
+    # 6. Divergence RSI baissière
+    if rsi_div == 'bearish':
+        conviction_vente += weights.get('rsi_divergence', 2)
+    
+    # 7. Pattern de chandelier baissier
+    if pattern_dir == 'bearish':
+        conviction_vente += weights.get('pattern_bearish', 1.5)
+    
+    # 8. Bonus tendance baissière
+    if trend in ['bearish', 'strong_bearish']:
+        conviction_vente += weights.get('trend_bonus', 1)
+    
+    # 9. DI- > DI+ (momentum vendeur)
+    if di_minus > di_plus and adx > adx_cfg['weak']:
+        conviction_vente += 0.5
+    
+    # 10. Prix sous les moyennes mobiles clés (NOUVEAU)
+    close = row.get('Close', 0)
+    sma_20 = row.get('sma_20')
+    sma_50 = row.get('sma_50')
+    
+    if sma_20 is not None and sma_50 is not None:
+        if close < sma_20 < sma_50:  # Prix sous SMA20 qui est sous SMA50
+            conviction_vente += 0.7
+        elif close < sma_20:  # Prix sous SMA20
+            conviction_vente += 0.3
+    
+    # ============================================
+    # === AJUSTEMENTS ET PÉNALITÉS ===
+    # ============================================
+    
+    # Pénalité légère pour signaux contre-tendance forte
     against_penalty = decision.get('against_trend_penalty', 0.5)
-    if trend == 'strong_bullish' and conviction_vente > 0:
-        conviction_vente *= against_penalty
-    if trend == 'strong_bearish' and conviction_achat > 0:
-        conviction_achat *= against_penalty
+    if trend == 'strong_bullish' and conviction_vente > conviction_achat:
+        conviction_vente *= (1 - against_penalty * 0.3)  # Pénalité réduite
+    if trend == 'strong_bearish' and conviction_achat > conviction_vente:
+        conviction_achat *= (1 - against_penalty * 0.3)
     
-    # Bonus ADX
+    # Bonus si ADX confirme une tendance forte
     adx_level = decision.get('adx_confirmation_level', 30)
     adx_bonus = decision.get('adx_confirmation_bonus', 1.2)
     if adx > adx_level:
-        if trend in ['bullish', 'strong_bullish']:
+        if trend in ['bullish', 'strong_bullish'] and conviction_achat > conviction_vente:
             conviction_achat *= adx_bonus
-        elif trend in ['bearish', 'strong_bearish']:
+        elif trend in ['bearish', 'strong_bearish'] and conviction_vente > conviction_achat:
             conviction_vente *= adx_bonus
     
+    # ============================================
     # === DÉCISION FINALE ===
+    # ============================================
+    
     seuil_minimum = decision.get('min_conviction_threshold', 2.5)
     diff_minimum = decision.get('conviction_difference', 0.5)
     max_conviction = decision.get('max_conviction', 5)
@@ -397,9 +428,12 @@ def calculate_recommendation_v2(row, df, config=None, signal_timeframe=1):
     conviction_achat = round(conviction_achat, 1)
     conviction_vente = round(conviction_vente, 1)
     
-    if conviction_achat >= seuil_minimum and conviction_achat > conviction_vente + diff_minimum:
+    # Décision avec seuil plus bas pour permettre plus de signaux
+    seuil_effectif = seuil_minimum * 0.8  # Seuil réduit de 20%
+    
+    if conviction_achat >= seuil_effectif and conviction_achat > conviction_vente + diff_minimum:
         return 'Acheter', min(int(round(conviction_achat)), max_conviction)
-    elif conviction_vente >= seuil_minimum and conviction_vente > conviction_achat + diff_minimum:
+    elif conviction_vente >= seuil_effectif and conviction_vente > conviction_achat + diff_minimum:
         return 'Vendre', min(int(round(conviction_vente)), max_conviction)
     else:
         max_conv = max(conviction_achat, conviction_vente)

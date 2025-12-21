@@ -9,28 +9,6 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 
-from data_handler import fetch_and_prepare_data, save_indicators_to_db
-from config import (
-    get_default_config, SIGNAL_TIMEFRAME, INDICATOR_DESCRIPTIONS,
-    load_user_assets, save_user_assets, add_asset, remove_asset
-)
-from fundamental_analyzer import (
-    get_fundamental_data, calculate_fundamental_score, 
-    format_large_number, format_ratio, get_ratio_color,
-    FUNDAMENTAL_THRESHOLDS
-)
-
-# app.py
-import dash
-from dash import dcc, html, dash_table, Input, Output, State, callback, ALL, ctx
-import dash_bootstrap_components as dbc
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from datetime import date
-import pandas as pd
-import numpy as np
-import yfinance as yf
-
 # === INITIALISATION DE LA BASE DE DONNÉES ===
 try:
     from db_manager import init_database, check_database_connection
@@ -53,8 +31,6 @@ from fundamental_analyzer import (
     format_large_number, format_ratio, get_ratio_color,
     FUNDAMENTAL_THRESHOLDS
 )
-
-# ... reste du code inchangé ...
 
 
 # --- Initialisation de l'application Dash ---
@@ -1090,50 +1066,63 @@ def create_quarterly_chart(df, columns, names, title, normalize=False):
 def calculate_indicator_contributions(row, config):
     """
     Calcule la contribution de chaque indicateur à la recommandation.
-    Retourne une liste de dictionnaires avec les détails de chaque indicateur.
+    VERSION CORRIGÉE : Affiche les contributions réelles (achat ET vente séparément)
     """
     contributions = []
     weights = config.get('signal_weights', {})
     rsi_cfg = config.get('rsi', {})
     stoch_cfg = config.get('stochastic', {})
-    
-    # Direction générale (achat ou vente)
-    recommendation = row.get('recommendation', 'Neutre')
-    is_buy = recommendation == 'Acheter'
-    is_sell = recommendation == 'Vendre'
+    adx_cfg = config.get('adx', {})
     
     # === RSI ===
     rsi = row.get('rsi')
     rsi_weight = weights.get('rsi_exit_oversold', 2.0)
     if rsi is not None:
-        if rsi < rsi_cfg.get('oversold', 30):
-            rsi_interpretation = "Survente (signal achat)"
+        buy_contrib = 0
+        sell_contrib = 0
+        
+        if rsi <= rsi_cfg.get('oversold', 30):
+            rsi_interpretation = "Survente extrême"
             rsi_signal = "🟢 Achat"
-            rsi_contrib = rsi_weight if is_buy else 0
-        elif rsi > rsi_cfg.get('overbought', 70):
-            rsi_interpretation = "Surachat (signal vente)"
-            rsi_signal = "🔴 Vente"
-            rsi_contrib = rsi_weight if is_sell else 0
+            buy_contrib = rsi_weight * 1.2
         elif rsi_cfg.get('exit_oversold_min', 30) <= rsi <= rsi_cfg.get('exit_oversold_max', 40):
-            rsi_interpretation = "Sortie de survente"
-            rsi_signal = "🟢 Achat"
-            rsi_contrib = rsi_weight if is_buy else 0
-        elif rsi_cfg.get('exit_overbought_min', 60) <= rsi <= rsi_cfg.get('exit_overbought_max', 70):
-            rsi_interpretation = "Sortie de surachat"
+            stoch_k = row.get('stochastic_k', 50)
+            stoch_d = row.get('stochastic_d', 50)
+            if stoch_k and stoch_d and stoch_k > stoch_d:
+                rsi_interpretation = "Sortie survente + confirmation stoch"
+                rsi_signal = "🟢 Achat"
+                buy_contrib = rsi_weight
+            else:
+                rsi_interpretation = "Sortie survente (sans confirmation)"
+                rsi_signal = "🟡 Achat faible"
+                buy_contrib = rsi_weight * 0.5
+        elif rsi >= rsi_cfg.get('overbought', 70):
+            rsi_interpretation = "Surachat extrême"
             rsi_signal = "🔴 Vente"
-            rsi_contrib = rsi_weight if is_sell else 0
+            sell_contrib = rsi_weight * 1.2
+        elif rsi_cfg.get('exit_overbought_min', 60) <= rsi <= rsi_cfg.get('exit_overbought_max', 70):
+            stoch_k = row.get('stochastic_k', 50)
+            stoch_d = row.get('stochastic_d', 50)
+            if stoch_k and stoch_d and stoch_k < stoch_d:
+                rsi_interpretation = "Sortie surachat + confirmation stoch"
+                rsi_signal = "🔴 Vente"
+                sell_contrib = rsi_weight
+            else:
+                rsi_interpretation = "Sortie surachat (sans confirmation)"
+                rsi_signal = "🟠 Vente faible"
+                sell_contrib = rsi_weight * 0.5
         else:
             rsi_interpretation = "Zone neutre"
             rsi_signal = "⚪ Neutre"
-            rsi_contrib = 0
         
         contributions.append({
-            'name': INDICATOR_DETAILS['rsi']['name'],
-            'interpretation_guide': INDICATOR_DETAILS['rsi']['interpretation'],
+            'name': 'RSI',
+            'interpretation_guide': '<30 = survente (achat), >70 = surachat (vente)',
             'value': f"{rsi:.1f}",
             'signal': rsi_signal,
             'weight': rsi_weight,
-            'contribution': rsi_contrib,
+            'buy_contrib': buy_contrib,
+            'sell_contrib': sell_contrib,
             'interpretation': rsi_interpretation
         })
     
@@ -1142,36 +1131,44 @@ def calculate_indicator_contributions(row, config):
     stoch_d = row.get('stochastic_d')
     stoch_weight = weights.get('stoch_bullish_cross', 1.0)
     if stoch_k is not None and stoch_d is not None:
-        if stoch_k < stoch_cfg.get('oversold', 20):
+        buy_contrib = 0
+        sell_contrib = 0
+        
+        # Zone basse (achat)
+        if stoch_k < stoch_cfg.get('oversold', 20) + 10:
             if stoch_k > stoch_d:
-                stoch_interpretation = "Survente + croisement haussier"
+                stoch_interpretation = "Zone basse + croisement haussier"
                 stoch_signal = "🟢 Achat"
-                stoch_contrib = stoch_weight if is_buy else 0
+                buy_contrib = stoch_weight
             else:
-                stoch_interpretation = "Survente (attendre croisement)"
+                stoch_interpretation = "Zone basse (attendre croisement)"
                 stoch_signal = "🟡 Attention"
-                stoch_contrib = 0
-        elif stoch_k > stoch_cfg.get('overbought', 80):
+        # Zone haute (vente)
+        elif stoch_k > stoch_cfg.get('overbought', 80) - 10:
             if stoch_k < stoch_d:
-                stoch_interpretation = "Surachat + croisement baissier"
+                stoch_interpretation = "Zone haute + croisement baissier"
                 stoch_signal = "🔴 Vente"
-                stoch_contrib = stoch_weight if is_sell else 0
+                sell_contrib = stoch_weight
             else:
-                stoch_interpretation = "Surachat (attendre croisement)"
-                stoch_signal = "🟡 Attention"
-                stoch_contrib = 0
+                stoch_interpretation = "Zone haute (attendre croisement)"
+                stoch_signal = "🟠 Attention"
+        # Zone médiane avec retournement
+        elif stoch_k > 50 and stoch_k < stoch_d:
+            stoch_interpretation = "Retournement baissier en zone médiane"
+            stoch_signal = "🟠 Vente faible"
+            sell_contrib = 0.5
         else:
             stoch_interpretation = "Zone neutre"
             stoch_signal = "⚪ Neutre"
-            stoch_contrib = 0
         
         contributions.append({
-            'name': INDICATOR_DETAILS['stochastic']['name'],
-            'interpretation_guide': INDICATOR_DETAILS['stochastic']['interpretation'],
+            'name': 'Stochastique (%K/%D)',
+            'interpretation_guide': 'Croisement %K/%D en zones extrêmes',
             'value': f"%K: {stoch_k:.1f} / %D: {stoch_d:.1f}",
             'signal': stoch_signal,
             'weight': stoch_weight,
-            'contribution': stoch_contrib,
+            'buy_contrib': buy_contrib,
+            'sell_contrib': sell_contrib,
             'interpretation': stoch_interpretation
         })
     
@@ -1183,145 +1180,198 @@ def calculate_indicator_contributions(row, config):
     macd_hist_weight = weights.get('macd_histogram_positive', 0.5)
     
     if macd is not None and macd_signal_val is not None:
-        macd_contrib = 0
-        if macd > macd_signal_val:
-            if macd_hist > 0:
-                macd_interpretation = "Croisement haussier confirmé"
-                macd_signal = "🟢 Achat"
-                macd_contrib = macd_weight if is_buy else 0
-            else:
-                macd_interpretation = "MACD > Signal mais histogramme négatif"
-                macd_signal = "🟡 Attention"
-        elif macd < macd_signal_val:
-            if macd_hist < 0:
-                macd_interpretation = "Croisement baissier confirmé"
-                macd_signal = "🔴 Vente"
-                macd_contrib = macd_weight if is_sell else 0
-            else:
-                macd_interpretation = "MACD < Signal mais histogramme positif"
-                macd_signal = "🟡 Attention"
+        buy_contrib = 0
+        sell_contrib = 0
+        
+        if macd > macd_signal_val and macd_hist and macd_hist > 0:
+            macd_interpretation = "Croisement haussier confirmé"
+            macd_signal = "🟢 Achat"
+            buy_contrib = macd_weight
+        elif macd < macd_signal_val and macd_hist and macd_hist < 0:
+            macd_interpretation = "Croisement baissier confirmé"
+            macd_signal = "🔴 Vente"
+            sell_contrib = macd_weight
+            # Bonus si MACD sous zéro
+            if macd < 0 and macd_signal_val < 0:
+                sell_contrib += 0.5
+                macd_interpretation += " + sous zéro"
+        elif macd > macd_signal_val:
+            macd_interpretation = "MACD > Signal (hist négatif)"
+            macd_signal = "🟡 Mixte"
         else:
-            macd_interpretation = "Neutre"
-            macd_signal = "⚪ Neutre"
+            macd_interpretation = "MACD < Signal (hist positif)"
+            macd_signal = "🟠 Mixte"
         
         contributions.append({
-            'name': INDICATOR_DETAILS['macd']['name'],
-            'interpretation_guide': INDICATOR_DETAILS['macd']['interpretation'],
-            'value': f"{macd:.2f} (Signal: {macd_signal_val:.2f})",
+            'name': 'MACD',
+            'interpretation_guide': 'Croisement MACD/Signal + histogramme',
+            'value': f"{macd:.2f} vs {macd_signal_val:.2f}",
             'signal': macd_signal,
             'weight': macd_weight,
-            'contribution': macd_contrib,
+            'buy_contrib': buy_contrib,
+            'sell_contrib': sell_contrib,
             'interpretation': macd_interpretation
         })
         
-        # Histogramme MACD
+        # Histogramme MACD séparé
         if macd_hist is not None:
+            hist_buy = 0
+            hist_sell = 0
             if macd_hist > 0:
                 hist_interpretation = "Momentum haussier"
                 hist_signal = "🟢 Achat"
-                hist_contrib = macd_hist_weight if is_buy else 0
+                hist_buy = macd_hist_weight
             elif macd_hist < 0:
                 hist_interpretation = "Momentum baissier"
                 hist_signal = "🔴 Vente"
-                hist_contrib = macd_hist_weight if is_sell else 0
+                hist_sell = macd_hist_weight
             else:
                 hist_interpretation = "Neutre"
                 hist_signal = "⚪ Neutre"
-                hist_contrib = 0
             
             contributions.append({
-                'name': INDICATOR_DETAILS['macd_histogram']['name'],
-                'interpretation_guide': INDICATOR_DETAILS['macd_histogram']['interpretation'],
+                'name': 'Histogramme MACD',
+                'interpretation_guide': 'Force du momentum',
                 'value': f"{macd_hist:.3f}",
                 'signal': hist_signal,
                 'weight': macd_hist_weight,
-                'contribution': hist_contrib,
+                'buy_contrib': hist_buy,
+                'sell_contrib': hist_sell,
                 'interpretation': hist_interpretation
             })
     
     # === TENDANCE ===
     trend = row.get('trend', 'neutral')
     trend_weight = weights.get('trend_bonus', 1.0)
-    trend_map = {
-        'strong_bullish': ('Tendance haussière forte', '🟢 Achat', trend_weight if is_buy else 0),
-        'bullish': ('Tendance haussière', '🟢 Achat', trend_weight * 0.5 if is_buy else 0),
-        'neutral': ('Tendance neutre', '⚪ Neutre', 0),
-        'bearish': ('Tendance baissière', '🔴 Vente', trend_weight * 0.5 if is_sell else 0),
-        'strong_bearish': ('Tendance baissière forte', '🔴 Vente', trend_weight if is_sell else 0),
-    }
-    trend_info = trend_map.get(trend, ('Inconnu', '⚪ Neutre', 0))
+    buy_contrib = 0
+    sell_contrib = 0
+    
+    if trend == 'strong_bullish':
+        trend_interpretation = "Tendance haussière forte"
+        trend_signal = "🟢 Achat"
+        buy_contrib = trend_weight
+    elif trend == 'bullish':
+        trend_interpretation = "Tendance haussière"
+        trend_signal = "🟢 Achat"
+        buy_contrib = trend_weight
+    elif trend == 'strong_bearish':
+        trend_interpretation = "Tendance baissière forte"
+        trend_signal = "🔴 Vente"
+        sell_contrib = trend_weight
+    elif trend == 'bearish':
+        trend_interpretation = "Tendance baissière"
+        trend_signal = "🔴 Vente"
+        sell_contrib = trend_weight
+    else:
+        trend_interpretation = "Tendance neutre"
+        trend_signal = "⚪ Neutre"
     
     contributions.append({
-        'name': INDICATOR_DETAILS['trend']['name'],
-        'interpretation_guide': INDICATOR_DETAILS['trend']['interpretation'],
+        'name': 'Tendance (MAs)',
+        'interpretation_guide': 'Alignement Prix > SMA20 > SMA50 > SMA200',
         'value': trend.replace('_', ' ').title(),
-        'signal': trend_info[1],
+        'signal': trend_signal,
         'weight': trend_weight,
-        'contribution': trend_info[2],
-        'interpretation': trend_info[0]
+        'buy_contrib': buy_contrib,
+        'sell_contrib': sell_contrib,
+        'interpretation': trend_interpretation
     })
     
-    # === ADX ===
+    # === ADX / DI ===
     adx = row.get('adx')
     di_plus = row.get('di_plus')
     di_minus = row.get('di_minus')
-    adx_cfg = config.get('adx', {})
     
-    if adx is not None:
-        if adx >= adx_cfg.get('very_strong', 40):
-            adx_interpretation = "Tendance très forte"
-        elif adx >= adx_cfg.get('strong', 25):
-            adx_interpretation = "Tendance forte"
-        elif adx >= adx_cfg.get('weak', 20):
-            adx_interpretation = "Tendance modérée"
-        else:
-            adx_interpretation = "Pas de tendance claire"
+    if adx is not None and di_plus is not None and di_minus is not None:
+        buy_contrib = 0
+        sell_contrib = 0
         
-        if di_plus is not None and di_minus is not None:
+        if adx > adx_cfg.get('weak', 20):
             if di_plus > di_minus:
-                adx_signal = "🟢 Haussier"
-            elif di_minus > di_plus:
-                adx_signal = "🔴 Baissier"
+                adx_interpretation = f"Tendance haussière (ADX={adx:.0f})"
+                adx_signal = "🟢 Achat"
+                buy_contrib = 0.5
             else:
-                adx_signal = "⚪ Neutre"
-            adx_value = f"ADX: {adx:.1f} (DI+: {di_plus:.1f}, DI-: {di_minus:.1f})"
+                adx_interpretation = f"Tendance baissière (ADX={adx:.0f})"
+                adx_signal = "🔴 Vente"
+                sell_contrib = 0.5
         else:
+            adx_interpretation = f"Pas de tendance claire (ADX={adx:.0f})"
             adx_signal = "⚪ Neutre"
-            adx_value = f"{adx:.1f}"
         
         contributions.append({
-            'name': INDICATOR_DETAILS['adx']['name'],
-            'interpretation_guide': INDICATOR_DETAILS['adx']['interpretation'],
-            'value': adx_value,
+            'name': 'ADX / DI+/DI-',
+            'interpretation_guide': 'Force et direction de la tendance',
+            'value': f"ADX:{adx:.0f} DI+:{di_plus:.0f} DI-:{di_minus:.0f}",
             'signal': adx_signal,
-            'weight': "—",
-            'contribution': "—",
+            'weight': 0.5,
+            'buy_contrib': buy_contrib,
+            'sell_contrib': sell_contrib,
             'interpretation': adx_interpretation
+        })
+    
+    # === PRIX VS MOYENNES MOBILES ===
+    close = row.get('close')
+    sma_20 = row.get('sma_20')
+    sma_50 = row.get('sma_50')
+    
+    if close is not None and sma_20 is not None and sma_50 is not None:
+        buy_contrib = 0
+        sell_contrib = 0
+        
+        if close < sma_20 < sma_50:
+            ma_interpretation = "Prix < SMA20 < SMA50 (structure baissière)"
+            ma_signal = "🔴 Vente"
+            sell_contrib = 0.7
+        elif close < sma_20:
+            ma_interpretation = "Prix sous SMA20"
+            ma_signal = "🟠 Vente faible"
+            sell_contrib = 0.3
+        elif close > sma_20 > sma_50:
+            ma_interpretation = "Prix > SMA20 > SMA50 (structure haussière)"
+            ma_signal = "🟢 Achat"
+            buy_contrib = 0.7
+        else:
+            ma_interpretation = "Structure mixte"
+            ma_signal = "⚪ Neutre"
+        
+        contributions.append({
+            'name': 'Prix vs MAs',
+            'interpretation_guide': 'Position du prix par rapport aux moyennes',
+            'value': f"Close:{close:.2f} SMA20:{sma_20:.2f}",
+            'signal': ma_signal,
+            'weight': 0.7,
+            'buy_contrib': buy_contrib,
+            'sell_contrib': sell_contrib,
+            'interpretation': ma_interpretation
         })
     
     # === DIVERGENCE RSI ===
     rsi_div = row.get('rsi_divergence', 'none')
     div_weight = weights.get('rsi_divergence', 2.0)
+    buy_contrib = 0
+    sell_contrib = 0
+    
     if rsi_div == 'bullish':
         div_interpretation = "Divergence haussière détectée"
         div_signal = "🟢 Achat"
-        div_contrib = div_weight if is_buy else 0
+        buy_contrib = div_weight
     elif rsi_div == 'bearish':
         div_interpretation = "Divergence baissière détectée"
         div_signal = "🔴 Vente"
-        div_contrib = div_weight if is_sell else 0
+        sell_contrib = div_weight
     else:
         div_interpretation = "Aucune divergence"
         div_signal = "⚪ Neutre"
-        div_contrib = 0
     
     contributions.append({
-        'name': INDICATOR_DETAILS['divergence']['name'],
-        'interpretation_guide': INDICATOR_DETAILS['divergence']['interpretation'],
+        'name': 'Divergence RSI',
+        'interpretation_guide': 'Prix vs RSI en désaccord = retournement',
         'value': rsi_div.title() if rsi_div != 'none' else 'Aucune',
         'signal': div_signal,
         'weight': div_weight,
-        'contribution': div_contrib,
+        'buy_contrib': buy_contrib,
+        'sell_contrib': sell_contrib,
         'interpretation': div_interpretation
     })
     
@@ -1329,28 +1379,29 @@ def calculate_indicator_contributions(row, config):
     pattern = row.get('pattern', 'Aucun')
     pattern_dir = row.get('pattern_direction', 'neutral')
     pattern_weight = weights.get('pattern_bullish', 1.5)
+    buy_contrib = 0
+    sell_contrib = 0
     
-    if pattern != 'Aucun' and pattern_dir != 'neutral':
-        if pattern_dir == 'bullish':
-            pattern_interpretation = f"Pattern haussier: {pattern}"
-            pattern_signal = "🟢 Achat"
-            pattern_contrib = pattern_weight if is_buy else 0
-        else:
-            pattern_interpretation = f"Pattern baissier: {pattern}"
-            pattern_signal = "🔴 Vente"
-            pattern_contrib = pattern_weight if is_sell else 0
+    if pattern != 'Aucun' and pattern_dir == 'bullish':
+        pattern_interpretation = f"Pattern haussier: {pattern}"
+        pattern_signal = "🟢 Achat"
+        buy_contrib = pattern_weight
+    elif pattern != 'Aucun' and pattern_dir == 'bearish':
+        pattern_interpretation = f"Pattern baissier: {pattern}"
+        pattern_signal = "🔴 Vente"
+        sell_contrib = pattern_weight
     else:
         pattern_interpretation = "Aucun pattern significatif"
         pattern_signal = "⚪ Neutre"
-        pattern_contrib = 0
     
     contributions.append({
-        'name': INDICATOR_DETAILS['pattern']['name'],
-        'interpretation_guide': INDICATOR_DETAILS['pattern']['interpretation'],
+        'name': 'Pattern Chandelier',
+        'interpretation_guide': 'Figures de retournement (Engulfing, Hammer...)',
         'value': pattern,
         'signal': pattern_signal,
         'weight': pattern_weight,
-        'contribution': pattern_contrib,
+        'buy_contrib': buy_contrib,
+        'sell_contrib': sell_contrib,
         'interpretation': pattern_interpretation
     })
     
@@ -1358,46 +1409,93 @@ def calculate_indicator_contributions(row, config):
 
 
 def create_technical_indicators_table(row, config):
-    """Crée le tableau détaillé des indicateurs techniques."""
+    """Crée le tableau détaillé des indicateurs techniques - VERSION CORRIGÉE."""
     contributions = calculate_indicator_contributions(row, config)
     
     rows = []
-    total_contribution = 0
+    total_buy = 0
+    total_sell = 0
     
     for ind in contributions:
-        contrib = ind['contribution']
-        if isinstance(contrib, (int, float)):
-            total_contribution += contrib
-            contrib_display = f"+{contrib:.1f}" if contrib > 0 else "0"
+        buy_c = ind.get('buy_contrib', 0)
+        sell_c = ind.get('sell_contrib', 0)
+        total_buy += buy_c
+        total_sell += sell_c
+        
+        # Afficher la contribution dominante
+        if buy_c > 0 and sell_c == 0:
+            contrib_display = html.Span(f"+{buy_c:.1f}", style={'color': '#26a69a'})
+        elif sell_c > 0 and buy_c == 0:
+            contrib_display = html.Span(f"-{sell_c:.1f}", style={'color': '#ef5350'})
+        elif buy_c > 0 and sell_c > 0:
+            contrib_display = html.Span(f"+{buy_c:.1f}/-{sell_c:.1f}", style={'color': '#ffc107'})
         else:
-            contrib_display = contrib
+            contrib_display = html.Span("0", style={'color': '#6c757d'})
         
         rows.append(
             html.Tr([
-                html.Td(ind['name'], style={'fontWeight': 'bold', 'width': '15%'}),
-                html.Td(ind['interpretation_guide'], className="small", style={'width': '30%'}),
+                html.Td(ind['name'], style={'fontWeight': 'bold', 'width': '12%'}),
+                html.Td(ind['interpretation_guide'], className="small text-muted", style={'width': '22%'}),
                 html.Td(ind['value'], className="text-center", style={'width': '15%'}),
-                html.Td(ind['interpretation'], className="text-center", style={'width': '15%'}),
+                html.Td(ind['interpretation'], className="text-center small", style={'width': '20%'}),
                 html.Td(ind['signal'], className="text-center", style={'width': '10%'}),
-                html.Td(str(ind['weight']), className="text-center", style={'width': '7%'}),
-                html.Td(contrib_display, className="text-center", style={'width': '8%', 'fontWeight': 'bold'}),
+                html.Td(str(ind['weight']), className="text-center", style={'width': '6%'}),
+                html.Td(contrib_display, className="text-center", style={'width': '10%', 'fontWeight': 'bold'}),
             ])
         )
     
-    # Ligne de total
+    # Ligne de totaux
+    recommendation = row.get('recommendation', 'Neutre')
+    if recommendation == 'Acheter':
+        result_color = '#198754'
+        result_text = f"ACHAT: {total_buy:.1f}"
+    elif recommendation == 'Vendre':
+        result_color = '#dc3545'
+        result_text = f"VENTE: {total_sell:.1f}"
+    else:
+        result_color = '#6c757d'
+        result_text = f"NEUTRE"
+    
     rows.append(
         html.Tr([
-            html.Td("TOTAL", colSpan=6, className="text-end", style={'fontWeight': 'bold'}),
-            html.Td(f"{total_contribution:.1f}", className="text-center", 
-                   style={'fontWeight': 'bold', 'backgroundColor': '#198754' if row.get('recommendation') == 'Acheter' 
-                          else '#dc3545' if row.get('recommendation') == 'Vendre' else '#6c757d'}),
+            html.Td("TOTAUX", colSpan=5, className="text-end", style={'fontWeight': 'bold'}),
+            html.Td(
+                html.Div([
+                    html.Span(f"🟢 {total_buy:.1f}", style={'color': '#26a69a', 'marginRight': '10px'}),
+                    html.Span(f"🔴 {total_sell:.1f}", style={'color': '#ef5350'}),
+                ]),
+                className="text-center"
+            ),
+            html.Td(result_text, className="text-center", 
+                   style={'fontWeight': 'bold', 'backgroundColor': result_color, 'color': 'white'}),
         ], style={'backgroundColor': '#2c3034'})
     )
+    
+    # Explication du calcul
+    decision_cfg = config.get('decision', {})
+    seuil = decision_cfg.get('min_conviction_threshold', 2.5) * 0.8
+    diff = decision_cfg.get('conviction_difference', 0.5)
+    
+    explanation = html.Tr([
+        html.Td(
+            html.Small([
+                f"Règle: Score ≥ {seuil:.1f} ET différence ≥ {diff} → ",
+                html.Span("Achat", style={'color': '#26a69a'}),
+                " si vert > rouge, ",
+                html.Span("Vente", style={'color': '#ef5350'}),
+                " si rouge > vert"
+            ], className="text-muted"),
+            colSpan=7,
+            className="text-center",
+            style={'borderTop': '1px solid #444'}
+        )
+    ])
+    rows.append(explanation)
     
     return dbc.Table([
         html.Thead(html.Tr([
             html.Th("Indicateur"),
-            html.Th("Comment l'interpréter"),
+            html.Th("Guide"),
             html.Th("Valeur", className="text-center"),
             html.Th("Interprétation", className="text-center"),
             html.Th("Signal", className="text-center"),
