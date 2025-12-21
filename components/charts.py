@@ -9,8 +9,8 @@ import pandas as pd
 from config import INDICATOR_DESCRIPTIONS
 
 
-def create_price_chart(df_graph, selected_date, asset_name, show_ma, config):
-    """Crée le graphique principal des prix en chandeliers."""
+def create_price_chart(df_graph, selected_date, asset_name, show_ma, show_bb, config):
+    """Crée le graphique principal des prix en chandeliers avec Bollinger optionnel."""
     fig = go.Figure()
     
     fig.add_trace(go.Candlestick(
@@ -19,12 +19,42 @@ def create_price_chart(df_graph, selected_date, asset_name, show_ma, config):
         increasing_line_color='#26a69a', decreasing_line_color='#ef5350'
     ))
     
+    # Bandes de Bollinger (affichées en premier pour être en arrière-plan)
+    if show_bb and 'bb_upper' in df_graph.columns and 'bb_lower' in df_graph.columns:
+        # Bande supérieure
+        fig.add_trace(go.Scatter(
+            x=df_graph['Date'], y=df_graph['bb_upper'],
+            mode='lines', name='BB Haute',
+            line=dict(color='rgba(255, 165, 0, 0.6)', width=1),
+            hovertemplate='BB Haute: %{y:.2f}<extra></extra>'
+        ))
+        # Bande inférieure avec remplissage vers la bande supérieure
+        fig.add_trace(go.Scatter(
+            x=df_graph['Date'], y=df_graph['bb_lower'],
+            mode='lines', name='BB Basse',
+            line=dict(color='rgba(255, 165, 0, 0.6)', width=1),
+            fill='tonexty',
+            fillcolor='rgba(255, 165, 0, 0.1)',
+            hovertemplate='BB Basse: %{y:.2f}<extra></extra>'
+        ))
+        # Bande médiane (SMA 20)
+        if 'bb_middle' in df_graph.columns:
+            fig.add_trace(go.Scatter(
+                x=df_graph['Date'], y=df_graph['bb_middle'],
+                mode='lines', name='BB Milieu (SMA20)',
+                line=dict(color='rgba(255, 165, 0, 0.8)', width=1, dash='dot'),
+                hovertemplate='BB Milieu: %{y:.2f}<extra></extra>'
+            ))
+    
+    # Moyennes mobiles
     if show_ma:
         ma_cfg = config.get('moving_averages', {})
-        if 'sma_20' in df_graph.columns:
+        if 'sma_20' in df_graph.columns and not show_bb:  # Ne pas afficher SMA20 si BB est actif (BB middle = SMA20)
             fig.add_trace(go.Scatter(x=df_graph['Date'], y=df_graph['sma_20'],
                 mode='lines', name=f"SMA {ma_cfg.get('sma_short', 20)}",
                 line=dict(color='#00bfff', width=1.5), opacity=0.8))
+        elif 'sma_20' in df_graph.columns and show_bb:
+            pass  # SMA20 déjà affichée via BB middle
         if 'sma_50' in df_graph.columns:
             fig.add_trace(go.Scatter(x=df_graph['Date'], y=df_graph['sma_50'],
                 mode='lines', name=f"SMA {ma_cfg.get('sma_medium', 50)}",
@@ -37,9 +67,14 @@ def create_price_chart(df_graph, selected_date, asset_name, show_ma, config):
     fig.add_vline(x=selected_date, line_width=2, line_dash="dash", line_color="cyan")
     
     desc = INDICATOR_DESCRIPTIONS['price']
+    if show_bb:
+        desc += " + Bollinger"
+    if show_ma:
+        desc += " + MAs"
+        
     fig.update_layout(
         title=dict(text=f'{asset_name} — {desc}', font=dict(size=14)),
-        xaxis_rangeslider_visible=False, template='plotly_dark', showlegend=show_ma,
+        xaxis_rangeslider_visible=False, template='plotly_dark', showlegend=(show_ma or show_bb),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=10)),
         margin=dict(l=50, r=50, t=50, b=20)
     )
@@ -55,18 +90,19 @@ def create_recommendations_chart(df_graph, selected_date):
     
     for _, row in df_graph.iterrows():
         trend = row.get('trend', 'neutral')
+        bb_signal = row.get('bb_signal', 'neutral')
         if row['recommendation'] == 'Acheter':
             conviction_values.append(row['conviction'])
             bar_colors.append('#26a69a')
-            hover_texts.append(f"ACHETER | Conv: {row['conviction']}/5 | Trend: {trend}")
+            hover_texts.append(f"ACHETER | Conv: {row['conviction']}/5 | Trend: {trend} | BB: {bb_signal}")
         elif row['recommendation'] == 'Vendre':
             conviction_values.append(-row['conviction'])
             bar_colors.append('#ef5350')
-            hover_texts.append(f"VENDRE | Conv: {row['conviction']}/5 | Trend: {trend}")
+            hover_texts.append(f"VENDRE | Conv: {row['conviction']}/5 | Trend: {trend} | BB: {bb_signal}")
         else:
             conviction_values.append(0)
             bar_colors.append('rgba(128,128,128,0.3)')
-            hover_texts.append(f"Neutre | Trend: {trend}")
+            hover_texts.append(f"Neutre | Trend: {trend} | BB: {bb_signal}")
     
     fig.add_trace(go.Bar(x=df_graph['Date'], y=conviction_values, marker_color=bar_colors, 
                          hovertext=hover_texts, hoverinfo='text+x'))

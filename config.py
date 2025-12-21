@@ -27,6 +27,7 @@ SIGNAL_TIMEFRAME = {
 INDICATOR_DESCRIPTIONS = {
     'price': 'Évolution du cours avec chandeliers japonais',
     'moving_averages': 'Tendances court/moyen/long terme',
+    'bollinger': 'Bandes de volatilité (support/résistance dynamiques)',
     'trend': 'Force et direction de la tendance (ADX/DI)',
     'macd': 'Momentum et croisements de tendance',
     'recommendations': 'Signaux Achat/Vente avec niveau de conviction',
@@ -53,6 +54,13 @@ STOCHASTIC = {
     'smooth': 3,
     'oversold': 20,
     'overbought': 80,
+}
+
+# === BANDES DE BOLLINGER ===
+BOLLINGER = {
+    'period': 20,
+    'std_dev': 2.0,
+    'squeeze_threshold': 0.05,  # % de largeur pour détecter un squeeze
 }
 
 # === INDICATEURS DE TENDANCE ===
@@ -91,6 +99,8 @@ SIGNAL_WEIGHTS = {
     'macd_bearish': 1.0,
     'macd_histogram_negative': 0.5,
     'pattern_bearish': 1.5,
+    'bollinger_lower': 1.5,  # Signal achat sur bande basse
+    'bollinger_upper': 1.5,  # Signal vente sur bande haute
 }
 
 # === FILTRES ET SEUILS DE DÉCISION ===
@@ -140,6 +150,7 @@ def get_default_config():
         'signal_timeframe': SIGNAL_TIMEFRAME['lookback_days'],
         'rsi': RSI.copy(),
         'stochastic': STOCHASTIC.copy(),
+        'bollinger': BOLLINGER.copy(),
         'moving_averages': MOVING_AVERAGES.copy(),
         'macd': MACD.copy(),
         'adx': ADX.copy(),
@@ -234,6 +245,7 @@ def get_config_summary():
     
     RSI: période={RSI['period']}, survente<{RSI['oversold']}, surachat>{RSI['overbought']}
     Stochastique: K={STOCHASTIC['k_period']}, D={STOCHASTIC['d_period']}
+    Bollinger: période={BOLLINGER['period']}, écart-type={BOLLINGER['std_dev']}
     
     Moyennes Mobiles: SMA {MOVING_AVERAGES['sma_short']}/{MOVING_AVERAGES['sma_medium']}/{MOVING_AVERAGES['sma_long']}
     MACD: {MACD['fast']}/{MACD['slow']}/{MACD['signal']}

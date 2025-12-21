@@ -42,7 +42,7 @@ def register_dashboard_callbacks(app):
         df['Date'] = df['Date'].astype(str)
         data = df.to_dict('records')
         
-        return data, None  # Reset zoom quand on change d'actif/période
+        return data, None
     
     # === CALLBACK 2: Mise à jour des graphiques ===
     @app.callback(
@@ -116,7 +116,6 @@ def register_dashboard_callbacks(app):
             zoom_end = pd.to_datetime(zoom_range['end'])
             zoom_start = pd.to_datetime(zoom_range['start']) if zoom_range.get('start') else None
             
-            # Trouver la dernière date dans la plage de zoom
             df_in_zoom = df_filtered[df_filtered['Date'] <= zoom_end]
             if zoom_start:
                 df_in_zoom = df_in_zoom[df_in_zoom['Date'] >= zoom_start]
@@ -195,7 +194,6 @@ def register_dashboard_callbacks(app):
                 'end': relay_data['xaxis.range'][1]
             }
         elif 'xaxis.autorange' in relay_data:
-            # Double-clic pour reset
             return None
         
         raise PreventUpdate
@@ -228,8 +226,8 @@ def create_technical_header(last_row, selected_asset):
     conviction = last_row.get('conviction', 0)
     trend = last_row.get('trend', 'neutral')
     close_price = last_row.get('close', 0)
+    bb_signal = last_row.get('bb_signal', 'neutral')
     
-    # Gérer le cas où la date est un Timestamp
     date_val = last_row.get('date', last_row.get('Date', ''))
     if isinstance(date_val, pd.Timestamp):
         date_str = date_val.strftime('%Y-%m-%d')
@@ -248,11 +246,21 @@ def create_technical_header(last_row, selected_asset):
     
     trend_display = trend.replace('_', ' ').title() if isinstance(trend, str) else 'Neutral'
     if 'bullish' in str(trend):
-        trend_badge = dbc.Badge(f"↗ {trend_display}", color="success", className="me-3")
+        trend_badge = dbc.Badge(f"↗ {trend_display}", color="success", className="me-2")
     elif 'bearish' in str(trend):
-        trend_badge = dbc.Badge(f"↘ {trend_display}", color="danger", className="me-3")
+        trend_badge = dbc.Badge(f"↘ {trend_display}", color="danger", className="me-2")
     else:
-        trend_badge = dbc.Badge(f"→ {trend_display}", color="secondary", className="me-3")
+        trend_badge = dbc.Badge(f"→ {trend_display}", color="secondary", className="me-2")
+    
+    # Badge Bollinger
+    if bb_signal in ['lower_touch', 'lower_zone']:
+        bb_badge = dbc.Badge(f"BB: Support", color="success", className="me-3")
+    elif bb_signal in ['upper_touch', 'upper_zone']:
+        bb_badge = dbc.Badge(f"BB: Résistance", color="danger", className="me-3")
+    elif bb_signal == 'squeeze':
+        bb_badge = dbc.Badge(f"BB: Squeeze ⚡", color="warning", className="me-3")
+    else:
+        bb_badge = dbc.Badge(f"BB: Neutre", color="secondary", className="me-3")
     
     return [
         html.Span(f"{selected_asset}", className="fs-5 fw-bold me-3"),
@@ -260,6 +268,7 @@ def create_technical_header(last_row, selected_asset):
         reco_badge,
         conviction_badge,
         trend_badge,
+        bb_badge,
         html.Span(f"({date_str})", className="text-muted small"),
     ]
 
@@ -270,7 +279,8 @@ def create_main_charts_with_zoom(df_graph, selected_date, selected_asset, displa
     
     if 'price' in display_options:
         show_ma = 'moving_averages' in display_options
-        fig_price = create_price_chart(df_graph, selected_date, selected_asset, show_ma, config)
+        show_bb = 'bollinger' in display_options
+        fig_price = create_price_chart(df_graph, selected_date, selected_asset, show_ma, show_bb, config)
         if x_range:
             fig_price.update_xaxes(range=x_range)
         main_charts.append(
@@ -312,7 +322,7 @@ def create_main_charts_with_zoom(df_graph, selected_date, selected_asset, displa
             )
         ]))
     
-    # Ajouter des graphiques vides pour les IDs manquants
+    # Graphiques vides pour les IDs manquants
     if 'price' not in display_options:
         main_charts.append(html.Div(id='price-chart', style={'display': 'none'}))
     if 'recommendations' not in display_options:
@@ -406,7 +416,7 @@ def create_technical_charts_with_zoom(df_graph, selected_date, display_options, 
             )
         ]))
     
-    # Ajouter des graphiques vides pour les IDs manquants
+    # Graphiques vides pour les IDs manquants
     if 'macd' not in display_options:
         technical_charts.append(dcc.Graph(id='macd-chart', figure={}, style={'display': 'none'}))
     if 'volume' not in display_options:

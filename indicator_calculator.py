@@ -2,7 +2,7 @@
 import pandas as pd
 import pandas_ta as ta
 from config import (
-    RSI, STOCHASTIC, MOVING_AVERAGES, MACD, ADX,
+    RSI, STOCHASTIC, MOVING_AVERAGES, MACD, ADX, BOLLINGER,
     SIGNAL_WEIGHTS, DECISION, TREND, DIVERGENCE, SIGNAL_TIMEFRAME,
     get_default_config
 )
@@ -56,10 +56,16 @@ def calculate_all_indicators(df, config=None):
     ma_cfg = config.get('moving_averages', MOVING_AVERAGES)
     macd_cfg = config.get('macd', MACD)
     adx_cfg = config.get('adx', ADX)
+    bb_cfg = config.get('bollinger', BOLLINGER)
     
     # === INDICATEURS DE MOMENTUM ===
     df.ta.stoch(k=stoch_cfg['k_period'], d=stoch_cfg['d_period'], append=True)
     df.ta.rsi(length=rsi_cfg['period'], append=True)
+    
+    # === BANDES DE BOLLINGER ===
+    bb_period = bb_cfg['period']
+    bb_std = bb_cfg['std_dev']
+    df.ta.bbands(length=bb_period, std=bb_std, append=True)
     
     # === INDICATEURS DE TENDANCE ===
     df.ta.sma(length=ma_cfg['sma_short'], append=True)
@@ -72,7 +78,10 @@ def calculate_all_indicators(df, config=None):
     df.ta.macd(fast=macd_cfg['fast'], slow=macd_cfg['slow'], signal=macd_cfg['signal'], append=True)
     df.ta.adx(length=adx_cfg['period'], append=True)
     
-    # Renommer les colonnes
+    # Renommer les colonnes - avec gestion du format float pour std_dev
+    # pandas_ta utilise le format exact du paramètre (2.0 reste 2.0, pas 2)
+    bb_std_str = str(bb_std)  # "2.0" ou "2" selon la config
+    
     rename_map = {
         f'STOCHk_{stoch_cfg["k_period"]}_{stoch_cfg["d_period"]}_3': 'stochastic_k',
         f'STOCHd_{stoch_cfg["k_period"]}_{stoch_cfg["d_period"]}_3': 'stochastic_d',
@@ -90,8 +99,29 @@ def calculate_all_indicators(df, config=None):
         f'DMN_{adx_cfg["period"]}': 'di_minus',
     }
     
+    # Chercher les colonnes Bollinger avec différents formats possibles
+    bb_columns_found = {}
+    for col in df.columns:
+        if col.startswith('BBL_'):
+            bb_columns_found['bb_lower'] = col
+        elif col.startswith('BBM_'):
+            bb_columns_found['bb_middle'] = col
+        elif col.startswith('BBU_'):
+            bb_columns_found['bb_upper'] = col
+        elif col.startswith('BBB_'):
+            bb_columns_found['bb_bandwidth'] = col
+        elif col.startswith('BBP_'):
+            bb_columns_found['bb_percent'] = col
+    
+    # Ajouter les colonnes Bollinger trouvées au rename_map
+    for new_name, old_name in bb_columns_found.items():
+        rename_map[old_name] = new_name
+    
     existing_cols = {k: v for k, v in rename_map.items() if k in df.columns}
     df.rename(columns=existing_cols, inplace=True)
+
+    # Calculer le signal Bollinger
+    df['bb_signal'] = calculate_bollinger_signal(df, config)
 
     df['trend'] = calculate_trend(df, config)
     
@@ -119,6 +149,60 @@ def calculate_all_indicators(df, config=None):
     ))
 
     return df
+
+
+def calculate_bollinger_signal(df, config=None):
+    """
+    Calcule le signal Bollinger pour chaque ligne.
+    Retourne: 'lower_touch', 'upper_touch', 'squeeze', ou 'neutral'
+    """
+    if config is None:
+        config = get_default_config()
+    
+    bb_cfg = config.get('bollinger', BOLLINGER)
+    squeeze_threshold = bb_cfg.get('squeeze_threshold', 0.05)
+    
+    signals = []
+    
+    for idx in range(len(df)):
+        row = df.iloc[idx]
+        close = row.get('Close', 0)
+        bb_lower = row.get('bb_lower')
+        bb_upper = row.get('bb_upper')
+        bb_middle = row.get('bb_middle')
+        bb_bandwidth = row.get('bb_bandwidth')
+        
+        if pd.isna(bb_lower) or pd.isna(bb_upper) or pd.isna(close):
+            signals.append('neutral')
+            continue
+        
+        # Calculer la position dans les bandes (0 = bande basse, 1 = bande haute)
+        bb_range = bb_upper - bb_lower
+        if bb_range > 0:
+            position = (close - bb_lower) / bb_range
+        else:
+            position = 0.5
+        
+        # Détecter un squeeze (bandes très resserrées)
+        if bb_bandwidth is not None and bb_middle is not None and bb_middle > 0:
+            bandwidth_pct = bb_bandwidth / bb_middle * 100
+            if bandwidth_pct < squeeze_threshold * 100:
+                signals.append('squeeze')
+                continue
+        
+        # Détecter les touches de bandes
+        if position <= 0.05:  # Proche de la bande basse (5%)
+            signals.append('lower_touch')
+        elif position >= 0.95:  # Proche de la bande haute (95%)
+            signals.append('upper_touch')
+        elif position <= 0.20:  # Zone basse (20%)
+            signals.append('lower_zone')
+        elif position >= 0.80:  # Zone haute (80%)
+            signals.append('upper_zone')
+        else:
+            signals.append('neutral')
+    
+    return signals
 
 
 def calculate_trend(df, config=None):
@@ -194,10 +278,12 @@ def calculate_trend(df, config=None):
     
     return trends
 
-
 def detect_rsi_divergence(df, lookback=14, config=None):
     """
-    Détecte les divergences entre le prix et le RSI.
+    Détecte les divergences entre le prix et le RSI - VERSION CORRIGÉE.
+    
+    AMÉLIORATION: Détection basée sur les creux/sommets locaux réels,
+    pas sur une simple comparaison de 2 points.
     """
     if config is None:
         config = get_default_config()
@@ -208,37 +294,85 @@ def detect_rsi_divergence(df, lookback=14, config=None):
     
     divergences = ['none'] * len(df)
     
-    for i in range(lookback * 2, len(df)):
+    # Fonction pour trouver les creux locaux
+    def find_local_min(series, idx, window=5):
+        """Vérifie si l'index est un creux local."""
+        if idx < window or idx >= len(series) - window:
+            return False
+        
+        val = series.iloc[idx]
+        left_vals = series.iloc[idx-window:idx]
+        right_vals = series.iloc[idx+1:idx+window+1]
+        
+        return val <= left_vals.min() and val <= right_vals.min()
+    
+    # Fonction pour trouver les sommets locaux
+    def find_local_max(series, idx, window=5):
+        """Vérifie si l'index est un sommet local."""
+        if idx < window or idx >= len(series) - window:
+            return False
+        
+        val = series.iloc[idx]
+        left_vals = series.iloc[idx-window:idx]
+        right_vals = series.iloc[idx+1:idx+window+1]
+        
+        return val >= left_vals.max() and val >= right_vals.max()
+    
+    window = 5  # Fenêtre pour détecter les extremums locaux
+    min_distance = 5  # Distance minimum entre deux creux/sommets
+    max_distance = lookback * 2  # Distance maximum
+    
+    for i in range(lookback * 2 + window, len(df) - window):
         try:
             rsi = df['rsi'].iloc[i]
-            rsi_prev = df['rsi'].iloc[i - lookback]
             price = df['Close'].iloc[i]
-            price_prev = df['Close'].iloc[i - lookback]
             
-            if pd.isna(rsi) or pd.isna(rsi_prev):
+            if pd.isna(rsi):
                 continue
             
-            if price < price_prev and rsi > rsi_prev and rsi < rsi_low:
-                divergences[i] = 'bullish'
+            # === DIVERGENCE HAUSSIÈRE ===
+            # Le prix fait un nouveau creux mais le RSI fait un creux plus haut
+            if find_local_min(df['Close'], i, window) and rsi < rsi_low:
+                # Chercher le creux précédent
+                for j in range(i - min_distance, max(i - max_distance, lookback), -1):
+                    if find_local_min(df['Close'], j, window):
+                        prev_price = df['Close'].iloc[j]
+                        prev_rsi = df['rsi'].iloc[j]
+                        
+                        if pd.isna(prev_rsi):
+                            continue
+                        
+                        # Prix fait nouveau creux, RSI fait creux plus haut = divergence haussière
+                        if price < prev_price and rsi > prev_rsi:
+                            divergences[i] = 'bullish'
+                            break
             
-            elif price > price_prev and rsi < rsi_prev and rsi > rsi_high:
-                divergences[i] = 'bearish'
-                
+            # === DIVERGENCE BAISSIÈRE ===
+            # Le prix fait un nouveau sommet mais le RSI fait un sommet plus bas
+            elif find_local_max(df['Close'], i, window) and rsi > rsi_high:
+                # Chercher le sommet précédent
+                for j in range(i - min_distance, max(i - max_distance, lookback), -1):
+                    if find_local_max(df['Close'], j, window):
+                        prev_price = df['Close'].iloc[j]
+                        prev_rsi = df['rsi'].iloc[j]
+                        
+                        if pd.isna(prev_rsi):
+                            continue
+                        
+                        # Prix fait nouveau sommet, RSI fait sommet plus bas = divergence baissière
+                        if price > prev_price and rsi < prev_rsi:
+                            divergences[i] = 'bearish'
+                            break
+                            
         except (IndexError, KeyError):
             continue
     
     return divergences
 
-
 def calculate_recommendation_v3(row, df, config=None, signal_timeframe=1):
     """
     VERSION 3 : Logique de recommandation ÉQUILIBRÉE entre achat et vente.
-    
-    Changements majeurs :
-    - Suppression du filtre de tendance strict (permet signaux contre-tendance)
-    - Ajout de signaux de vente basés sur le momentum déclinant
-    - Détection des retournements de tendance
-    - Signaux plus réactifs aux conditions de surachat
+    Inclut maintenant les Bandes de Bollinger.
     """
     if config is None:
         config = get_default_config()
@@ -264,6 +398,7 @@ def calculate_recommendation_v3(row, df, config=None, signal_timeframe=1):
     adx = row.get('adx', 20)
     di_plus = row.get('di_plus', 25)
     di_minus = row.get('di_minus', 25)
+    bb_signal = row.get('bb_signal', 'neutral')
     
     conviction_achat = 0
     conviction_vente = 0
@@ -286,6 +421,11 @@ def calculate_recommendation_v3(row, df, config=None, signal_timeframe=1):
             divs_in_window = window[window['rsi_divergence'] != 'none']['rsi_divergence']
             if len(divs_in_window) > 0:
                 rsi_div = divs_in_window.iloc[-1]
+            
+            # Bollinger signals dans la fenêtre
+            bb_signals_in_window = window[window['bb_signal'].isin(['lower_touch', 'upper_touch'])]['bb_signal']
+            if len(bb_signals_in_window) > 0:
+                bb_signal = bb_signals_in_window.iloc[-1]
                 
         except Exception:
             pass
@@ -296,15 +436,15 @@ def calculate_recommendation_v3(row, df, config=None, signal_timeframe=1):
     
     # 1. RSI en zone de survente ou sortie de survente
     if rsi <= rsi_cfg['oversold']:
-        conviction_achat += weights.get('rsi_exit_oversold', 2) * 1.2  # Bonus survente extrême
+        conviction_achat += weights.get('rsi_exit_oversold', 2) * 1.2
     elif rsi_cfg['exit_oversold_min'] <= rsi <= rsi_cfg['exit_oversold_max']:
-        if stoch_k > stoch_d:  # Confirmation stochastique
+        if stoch_k > stoch_d:
             conviction_achat += weights.get('rsi_exit_oversold', 2)
         else:
             conviction_achat += weights.get('rsi_exit_oversold', 2) * 0.5
     
     # 2. Stochastique : croisement haussier en zone basse
-    if stoch_k < stoch_cfg['oversold'] + 10:  # Zone basse élargie
+    if stoch_k < stoch_cfg['oversold'] + 10:
         if stoch_k > stoch_d:
             conviction_achat += weights.get('stoch_bullish_cross', 1)
     
@@ -331,31 +471,36 @@ def calculate_recommendation_v3(row, df, config=None, signal_timeframe=1):
     if di_plus > di_minus and adx > adx_cfg['weak']:
         conviction_achat += 0.5
     
+    # 8. BOLLINGER - Signal d'achat sur bande basse
+    if bb_signal == 'lower_touch':
+        conviction_achat += weights.get('bollinger_lower', 1.5)
+    elif bb_signal == 'lower_zone':
+        conviction_achat += weights.get('bollinger_lower', 1.5) * 0.5
+    
     # ============================================
     # === SIGNAUX DE VENTE ===
     # ============================================
     
     # 1. RSI en zone de surachat ou sortie de surachat
     if rsi >= rsi_cfg['overbought']:
-        conviction_vente += weights.get('rsi_exit_overbought', 2) * 1.2  # Bonus surachat extrême
+        conviction_vente += weights.get('rsi_exit_overbought', 2) * 1.2
     elif rsi_cfg['exit_overbought_min'] <= rsi <= rsi_cfg['exit_overbought_max']:
-        if stoch_k < stoch_d:  # Confirmation stochastique
+        if stoch_k < stoch_d:
             conviction_vente += weights.get('rsi_exit_overbought', 2)
         else:
             conviction_vente += weights.get('rsi_exit_overbought', 2) * 0.5
     
-    # 2. RSI déclinant depuis zone haute (NOUVEAU)
+    # 2. RSI déclinant depuis zone haute
     if rsi > 50 and rsi < rsi_cfg['exit_overbought_min']:
-        # RSI qui descend après avoir été haut = momentum qui faiblit
         if stoch_k < stoch_d:
             conviction_vente += 0.8
     
     # 3. Stochastique : croisement baissier en zone haute
-    if stoch_k > stoch_cfg['overbought'] - 10:  # Zone haute élargie
+    if stoch_k > stoch_cfg['overbought'] - 10:
         if stoch_k < stoch_d:
             conviction_vente += weights.get('stoch_bearish_cross', 1)
     
-    # 4. Stochastique en retournement (NOUVEAU)
+    # 4. Stochastique en retournement
     if stoch_k > 50 and stoch_k < stoch_d:
         conviction_vente += 0.5
     
@@ -366,7 +511,6 @@ def calculate_recommendation_v3(row, df, config=None, signal_timeframe=1):
         elif macd_hist is not None and macd_hist < 0:
             conviction_vente += weights.get('macd_histogram_negative', 0.5)
         
-        # MACD qui passe sous zéro (NOUVEAU)
         if macd < 0 and macd_signal < 0:
             conviction_vente += 0.5
     
@@ -386,16 +530,22 @@ def calculate_recommendation_v3(row, df, config=None, signal_timeframe=1):
     if di_minus > di_plus and adx > adx_cfg['weak']:
         conviction_vente += 0.5
     
-    # 10. Prix sous les moyennes mobiles clés (NOUVEAU)
+    # 10. Prix sous les moyennes mobiles clés
     close = row.get('Close', 0)
     sma_20 = row.get('sma_20')
     sma_50 = row.get('sma_50')
     
     if sma_20 is not None and sma_50 is not None:
-        if close < sma_20 < sma_50:  # Prix sous SMA20 qui est sous SMA50
+        if close < sma_20 < sma_50:
             conviction_vente += 0.7
-        elif close < sma_20:  # Prix sous SMA20
+        elif close < sma_20:
             conviction_vente += 0.3
+    
+    # 11. BOLLINGER - Signal de vente sur bande haute
+    if bb_signal == 'upper_touch':
+        conviction_vente += weights.get('bollinger_upper', 1.5)
+    elif bb_signal == 'upper_zone':
+        conviction_vente += weights.get('bollinger_upper', 1.5) * 0.5
     
     # ============================================
     # === AJUSTEMENTS ET PÉNALITÉS ===
@@ -404,7 +554,7 @@ def calculate_recommendation_v3(row, df, config=None, signal_timeframe=1):
     # Pénalité légère pour signaux contre-tendance forte
     against_penalty = decision.get('against_trend_penalty', 0.5)
     if trend == 'strong_bullish' and conviction_vente > conviction_achat:
-        conviction_vente *= (1 - against_penalty * 0.3)  # Pénalité réduite
+        conviction_vente *= (1 - against_penalty * 0.3)
     if trend == 'strong_bearish' and conviction_achat > conviction_vente:
         conviction_achat *= (1 - against_penalty * 0.3)
     
@@ -428,8 +578,7 @@ def calculate_recommendation_v3(row, df, config=None, signal_timeframe=1):
     conviction_achat = round(conviction_achat, 1)
     conviction_vente = round(conviction_vente, 1)
     
-    # Décision avec seuil plus bas pour permettre plus de signaux
-    seuil_effectif = seuil_minimum * 0.8  # Seuil réduit de 20%
+    seuil_effectif = seuil_minimum * 0.8
     
     if conviction_achat >= seuil_effectif and conviction_achat > conviction_vente + diff_minimum:
         return 'Acheter', min(int(round(conviction_achat)), max_conviction)

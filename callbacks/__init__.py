@@ -3,6 +3,7 @@ from .config_callbacks import register_config_callbacks
 from .asset_callbacks import register_asset_callbacks
 from .dashboard_callbacks import register_dashboard_callbacks
 from .fundamental_callbacks import register_fundamental_callbacks
+from .performance_callbacks import register_performance_callbacks
 
 
 def register_all_callbacks(app):
@@ -11,3 +12,4 @@ def register_all_callbacks(app):
     register_asset_callbacks(app)
     register_dashboard_callbacks(app)
     register_fundamental_callbacks(app)
+    register_performance_callbacks(app)

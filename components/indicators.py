@@ -110,6 +110,49 @@ def calculate_indicator_contributions(row, config):
             'interpretation': stoch_interpretation
         })
     
+    # === BANDES DE BOLLINGER ===
+    bb_signal = row.get('bb_signal', 'neutral')
+    bb_percent = row.get('bb_percent')
+    bb_weight = weights.get('bollinger_lower', 1.5)
+    
+    buy_contrib = 0
+    sell_contrib = 0
+    
+    if bb_signal == 'lower_touch':
+        bb_interpretation = "Prix touche la bande basse (support)"
+        bb_signal_display = "🟢 Achat"
+        buy_contrib = bb_weight
+    elif bb_signal == 'lower_zone':
+        bb_interpretation = "Prix proche de la bande basse"
+        bb_signal_display = "🟡 Achat faible"
+        buy_contrib = bb_weight * 0.5
+    elif bb_signal == 'upper_touch':
+        bb_interpretation = "Prix touche la bande haute (résistance)"
+        bb_signal_display = "🔴 Vente"
+        sell_contrib = bb_weight
+    elif bb_signal == 'upper_zone':
+        bb_interpretation = "Prix proche de la bande haute"
+        bb_signal_display = "🟠 Vente faible"
+        sell_contrib = bb_weight * 0.5
+    elif bb_signal == 'squeeze':
+        bb_interpretation = "Squeeze détecté (volatilité faible, breakout imminent)"
+        bb_signal_display = "⚡ Attention"
+    else:
+        bb_interpretation = "Zone neutre"
+        bb_signal_display = "⚪ Neutre"
+    
+    bb_value = f"{bb_percent:.2f}" if bb_percent is not None else "N/A"
+    contributions.append({
+        'name': 'Bollinger Bands',
+        'interpretation_guide': '%B: 0=bande basse, 0.5=milieu, 1=bande haute',
+        'value': f"%B: {bb_value}",
+        'signal': bb_signal_display,
+        'weight': bb_weight,
+        'buy_contrib': buy_contrib,
+        'sell_contrib': sell_contrib,
+        'interpretation': bb_interpretation
+    })
+    
     # === MACD ===
     macd = row.get('macd')
     macd_signal_val = row.get('macd_signal')

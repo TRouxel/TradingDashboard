@@ -113,6 +113,25 @@ def create_config_modal():
                     ]),
                 ], title="📈 Stochastique"),
                 
+                # === BANDES DE BOLLINGER ===
+                dbc.AccordionItem([
+                    html.P("Les bandes de Bollinger mesurent la volatilité et définissent des zones de support/résistance dynamiques.", className="text-muted mb-3"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Période :"),
+                            dbc.Input(id='config-bb-period', type='number', value=default_config['bollinger']['period'], min=5, max=50),
+                        ], width=4),
+                        dbc.Col([
+                            html.Label("Écart-type :"),
+                            dbc.Input(id='config-bb-std', type='number', value=default_config['bollinger']['std_dev'], min=1, max=4, step=0.5),
+                        ], width=4),
+                        dbc.Col([
+                            html.Label("Poids signal :"),
+                            dbc.Input(id='config-weight-bollinger', type='number', value=default_config['signal_weights']['bollinger_lower'], min=0, max=5, step=0.5),
+                        ], width=4),
+                    ]),
+                ], title="📊 Bandes de Bollinger"),
+                
                 # === MOYENNES MOBILES ===
                 dbc.AccordionItem([
                     dbc.Row([

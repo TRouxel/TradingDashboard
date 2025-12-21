@@ -15,6 +15,7 @@ def get_display_options():
     return [
         {'label': f" Prix", 'value': 'price', 'title': INDICATOR_DESCRIPTIONS['price']},
         {'label': f" MAs", 'value': 'moving_averages', 'title': INDICATOR_DESCRIPTIONS['moving_averages']},
+        {'label': f" Bollinger", 'value': 'bollinger', 'title': INDICATOR_DESCRIPTIONS['bollinger']},
         {'label': f" Recos", 'value': 'recommendations', 'title': INDICATOR_DESCRIPTIONS['recommendations']},
         {'label': f" Tendance", 'value': 'trend', 'title': INDICATOR_DESCRIPTIONS['trend']},
         {'label': f" MACD", 'value': 'macd', 'title': INDICATOR_DESCRIPTIONS['macd']},
@@ -35,8 +36,9 @@ def create_main_layout():
         dcc.Store(id='assets-store', data=load_user_assets()),
         dcc.Store(id='fundamental-store', data={}),
         dcc.Store(id='technical-data-store', data={}),
-        dcc.Store(id='full-data-store', data={}),  # NOUVEAU: stocke toutes les données
-        dcc.Store(id='zoom-range-store', data=None),  # NOUVEAU: stocke la plage de zoom
+        dcc.Store(id='full-data-store', data={}),
+        dcc.Store(id='zoom-range-store', data=None),
+        dcc.Store(id='performance-store', data={}),
         
         # Modal de configuration
         create_config_modal(),
@@ -90,7 +92,7 @@ def create_main_layout():
                 dcc.Checklist(
                     id='display-options',
                     options=get_display_options(),
-                    value=['price', 'moving_averages', 'recommendations', 'trend', 'macd', 'volume', 'rsi', 'stochastic', 'patterns'],
+                    value=['price', 'moving_averages', 'bollinger', 'recommendations', 'trend', 'macd', 'volume', 'rsi', 'stochastic', 'patterns'],
                     inline=True,
                     className="mt-1",
                     inputStyle={"marginRight": "3px", "marginLeft": "8px"}
@@ -180,10 +182,64 @@ def create_main_layout():
             ),
         ], className="mb-3", color="dark", outline=True),
 
-        # === 3. GRAPHIQUES PRINCIPAUX ===
+        # === 3. BACKTESTING DES INDICATEURS (COLLAPSIBLE) ===
+        dbc.Card([
+            dbc.CardHeader([
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Button(
+                            id="collapse-performance-btn",
+                            color="link",
+                            className="text-white text-decoration-none p-0",
+                            children=[
+                                html.H5("📈 Backtesting des Indicateurs", className="mb-0 d-inline me-2"),
+                            ]
+                        ),
+                    ], width="auto"),
+                    dbc.Col([
+                        dbc.Button("🔍 Analyser", id="analyze-performance-btn", color="info", size="sm", className="me-3"),
+                        html.Span("Horizons: ", className="text-muted small me-1"),
+                        dcc.Checklist(
+                            id='performance-horizon-filter',
+                            options=[
+                                {'label': ' 1j', 'value': 1},
+                                {'label': ' 2j', 'value': 2},
+                                {'label': ' 5j', 'value': 5},
+                                {'label': ' 10j', 'value': 10},
+                                {'label': ' 20j', 'value': 20},
+                            ],
+                            value=[1, 2, 5, 10, 20],
+                            inline=True,
+                            inputStyle={"marginRight": "3px", "marginLeft": "8px"},
+                            className="d-inline",
+                            labelStyle={"fontSize": "12px"}
+                        ),
+                    ], className="d-flex align-items-center"),
+                ], align="center", className="g-0"),
+            ]),
+            dbc.Collapse(
+                dbc.CardBody([
+                    dcc.Loading(
+                        html.Div(id='performance-content', children=[
+                            html.P([
+                                "Cliquez sur ",
+                                html.Strong("'Analyser'"),
+                                " pour évaluer la performance historique de chaque indicateur. ",
+                                "Cela compare les signaux passés avec l'évolution réelle des prix."
+                            ], className="text-muted")
+                        ]),
+                        type="circle"
+                    )
+                ], className="p-2"),
+                id="collapse-performance",
+                is_open=False,
+            ),
+        ], className="mb-3", color="dark", outline=True),
+
+        # === 4. GRAPHIQUES PRINCIPAUX ===
         html.Div(id='main-charts-container'),
 
-        # === 4. GRAPHIQUES TECHNIQUES DÉTAILLÉS (COLLAPSE) ===
+        # === 5. GRAPHIQUES TECHNIQUES DÉTAILLÉS (COLLAPSE) ===
         dbc.Card([
             dbc.CardHeader([
                 dbc.Button(

@@ -16,3 +16,11 @@ from .tables import (
     create_fundamental_details
 )
 from .indicators import calculate_indicator_contributions
+from .performance_charts import (
+    create_indicator_performance_chart,
+    create_accuracy_badges,
+    create_performance_section,
+    create_performance_summary_cards,
+    HORIZON_COLORS,
+    HORIZON_NAMES
+)
