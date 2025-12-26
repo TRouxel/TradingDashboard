@@ -277,3 +277,108 @@ def _darken_color(hex_color, factor=0.5):
     rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
     darkened = tuple(int(c * factor) for c in rgb)
     return f'#{darkened[0]:02x}{darkened[1]:02x}{darkened[2]:02x}'
+
+
+def create_combination_ranking_table(combo_summary, selected_horizons=[1, 2, 5, 10, 20]):
+    """
+    Crée un tableau de classement des combinaisons par performance.
+    """
+    if not combo_summary:
+        return html.P("Aucune combinaison n'a généré de signaux.", className="text-muted")
+    
+    rows = []
+    
+    for i, combo in enumerate(combo_summary):
+        name = combo['name']
+        accuracy = combo['accuracy']
+        total_signals = combo['total_signals']
+        stats = combo['stats']
+        
+        # Déterminer la couleur selon la précision
+        if accuracy >= 60:
+            row_class = "table-success"
+            icon = "🥇" if i == 0 else "🥈" if i == 1 else "🥉" if i == 2 else "✓"
+        elif accuracy >= 55:
+            row_class = "table-primary"
+            icon = "✓"
+        elif accuracy >= 50:
+            row_class = "table-warning"
+            icon = "~"
+        else:
+            row_class = "table-danger"
+            icon = "✗"
+        
+        # Créer les badges pour chaque horizon
+        horizon_badges = []
+        for h in selected_horizons:
+            if h in stats and stats[h].get('accuracy') is not None:
+                h_acc = stats[h]['accuracy']
+                h_total = stats[h]['total_signals']
+                
+                if h_acc >= 55:
+                    badge_color = "success"
+                elif h_acc >= 50:
+                    badge_color = "warning"
+                else:
+                    badge_color = "danger"
+                
+                horizon_badges.append(
+                    dbc.Badge(
+                        f"{h}j: {h_acc:.0f}% ({h_total})",
+                        color=badge_color,
+                        className="me-1",
+                        style={'fontSize': '10px'}
+                    )
+                )
+            else:
+                horizon_badges.append(
+                    dbc.Badge(f"{h}j: N/A", color="secondary", className="me-1", style={'fontSize': '10px'})
+                )
+        
+        # Déterminer le type (achat/vente) basé sur l'emoji dans le nom
+        if name.startswith('🟢'):
+            type_badge = dbc.Badge("ACHAT", color="success", className="me-2")
+        elif name.startswith('🔴'):
+            type_badge = dbc.Badge("VENTE", color="danger", className="me-2")
+        else:
+            type_badge = dbc.Badge("—", color="secondary", className="me-2")
+        
+        # Nettoyer le nom (enlever l'emoji de préfixe)
+        clean_name = name.lstrip('🟢🔴 ')
+        
+        rows.append(
+            html.Tr([
+                html.Td(f"{icon} #{i+1}", className="text-center", style={'width': '5%'}),
+                html.Td([type_badge], style={'width': '8%'}),
+                html.Td(clean_name, style={'fontWeight': 'bold', 'width': '25%'}),
+                html.Td(f"{accuracy:.1f}%", className="text-center", 
+                       style={'fontWeight': 'bold', 'fontSize': '14px', 'width': '10%'}),
+                html.Td(str(total_signals), className="text-center", style={'width': '8%'}),
+                html.Td(horizon_badges, style={'width': '44%'}),
+            ], className=row_class)
+        )
+    
+    table = dbc.Table([
+        html.Thead(html.Tr([
+            html.Th("Rang", className="text-center"),
+            html.Th("Type"),
+            html.Th("Combinaison"),
+            html.Th("Précision Moy.", className="text-center"),
+            html.Th("Signaux", className="text-center"),
+            html.Th("Détail par Horizon"),
+        ]), style={'backgroundColor': '#1a1d20'}),
+        html.Tbody(rows)
+    ], bordered=True, color="dark", hover=True, size="sm", responsive=True)
+    
+    # Ajouter une légende
+    legend = html.Div([
+        html.Small([
+            html.Span("Légende: ", className="text-muted me-2"),
+            dbc.Badge("≥60%", color="success", className="me-1"), html.Span("Excellent ", className="me-3"),
+            dbc.Badge("55-60%", color="primary", className="me-1"), html.Span("Bon ", className="me-3"),
+            dbc.Badge("50-55%", color="warning", className="me-1"), html.Span("Moyen ", className="me-3"),
+            dbc.Badge("<50%", color="danger", className="me-1"), html.Span("Faible"),
+        ], className="text-muted")
+    ], className="mb-3")
+    
+    return html.Div([legend, table])

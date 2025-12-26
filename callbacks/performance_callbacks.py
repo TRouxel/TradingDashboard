@@ -6,10 +6,17 @@ from dash import html, Input, Output, State
 import dash_bootstrap_components as dbc
 import pandas as pd
 
-from indicator_performance import calculate_performance_history
+from indicator_performance import (
+    calculate_performance_history,
+    calculate_performance_history_with_combinations,
+    analyze_signal_combinations,
+    get_combination_summary,
+    calculate_accuracy_stats
+)
 from components.performance_charts import (
     create_performance_section,
     create_performance_summary_cards,
+    create_combination_ranking_table,
     HORIZON_NAMES
 )
 
@@ -41,12 +48,12 @@ def register_performance_callbacks(app):
         if triggered == 'performance-horizon-filter' and cached_perf:
             performance_history = {k: pd.DataFrame(v) for k, v in cached_perf.items()}
         elif triggered == 'analyze-performance-btn' or not cached_perf:
-            # Recalculer la performance
+            # Recalculer la performance avec les combinaisons
             df = pd.DataFrame(data)
             df['Date'] = pd.to_datetime(df['Date'])
             
             horizons = [1, 2, 5, 10, 20]
-            performance_history = calculate_performance_history(df, config, horizons)
+            performance_history = calculate_performance_history_with_combinations(df, config, horizons)
             
             if not performance_history:
                 return html.P("Pas assez de données pour analyser la performance.", className="text-muted"), {}
@@ -55,6 +62,15 @@ def register_performance_callbacks(app):
         
         if not selected_horizons:
             selected_horizons = [1, 2, 5, 10, 20]
+        
+        # Séparer indicateurs individuels et combinaisons
+        individual_perf = {k: v for k, v in performance_history.items() if k.startswith('📊')}
+        buy_combos = {k: v for k, v in performance_history.items() if k.startswith('🟢')}
+        sell_combos = {k: v for k, v in performance_history.items() if k.startswith('🔴')}
+        
+        # Créer le classement des combinaisons
+        all_combos = {**buy_combos, **sell_combos}
+        combo_summary = get_combination_summary(all_combos, selected_horizons)
         
         # Créer le contenu
         content = html.Div([
@@ -66,19 +82,40 @@ def register_performance_callbacks(app):
                     html.Strong("Score positif = prédiction correcte"),
                     ", ",
                     html.Strong("négatif = incorrecte"),
-                    ". Hauteur = intensité du signal."
+                    "."
                 ], className="text-muted small mb-3"),
             ]),
             
-            # Cartes résumé
-            html.H6("📈 Vue d'ensemble", className="mb-2"),
-            create_performance_summary_cards(performance_history, selected_horizons),
+            # === SECTION 1: CLASSEMENT DES COMBINAISONS ===
+            html.H5("🏆 Classement des Combinaisons de Signaux", className="mb-3 mt-4"),
+            html.P([
+                "Ces combinaisons sont celles utilisées dans le calcul de la recommandation. ",
+                "Elles combinent plusieurs indicateurs pour confirmer un signal."
+            ], className="text-muted small mb-3"),
+            create_combination_ranking_table(combo_summary, selected_horizons),
+            
+            html.Hr(className="my-4"),
+            
+            # === SECTION 2: INDICATEURS INDIVIDUELS ===
+            html.H5("📈 Performance des Indicateurs Individuels", className="mb-3"),
+            create_performance_summary_cards(individual_perf, selected_horizons),
             
             html.Hr(),
             
-            # Graphiques détaillés par indicateur
-            html.H6("📉 Historique par Indicateur", className="mb-3"),
-            create_performance_section(performance_history, selected_horizons),
+            # === SECTION 3: DÉTAILS PAR INDICATEUR ===
+            dbc.Accordion([
+                dbc.AccordionItem([
+                    create_performance_section(individual_perf, selected_horizons),
+                ], title="📊 Détails des Indicateurs Individuels"),
+                
+                dbc.AccordionItem([
+                    create_performance_section(buy_combos, selected_horizons),
+                ], title="🟢 Détails des Combinaisons d'Achat"),
+                
+                dbc.AccordionItem([
+                    create_performance_section(sell_combos, selected_horizons),
+                ], title="🔴 Détails des Combinaisons de Vente"),
+            ], start_collapsed=True, always_open=True),
         ])
         
         # Convertir pour le cache (DataFrame -> dict)

@@ -44,6 +44,19 @@ FUNDAMENTAL_THRESHOLDS = {
 }
 
 
+def get_quarter_string(date):
+    """Convertit une date en format trimestre (ex: 2024-Q1)."""
+    if pd.isna(date):
+        return "N/A"
+    try:
+        if isinstance(date, str):
+            date = pd.to_datetime(date)
+        quarter = (date.month - 1) // 3 + 1
+        return f"{date.year}-Q{quarter}"
+    except Exception:
+        return str(date)
+
+
 def get_fundamental_data(ticker_symbol):
     """
     Récupère les données fondamentales actuelles et historiques depuis yfinance.
@@ -154,7 +167,10 @@ def calculate_quarterly_history(ticker):
         
         # Parcourir chaque trimestre disponible
         for quarter_date in quarterly_financials.columns:
-            record = {'date': quarter_date, 'quarter': quarter_date.strftime('%Y-Q%q') if hasattr(quarter_date, 'strftime') else str(quarter_date)}
+            record = {
+                'date': quarter_date, 
+                'quarter': get_quarter_string(quarter_date)
+            }
             
             try:
                 # === Données du compte de résultat ===
@@ -261,7 +277,7 @@ def calculate_quarterly_history(ticker):
                 record['net_income'] = net_income
                 
             except Exception as e:
-                print(f"Erreur pour le trimestre {quarter_date}: {e}")
+                # Ignorer les erreurs silencieusement pour chaque trimestre
                 continue
             
             records.append(record)
