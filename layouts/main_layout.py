@@ -8,6 +8,7 @@ import dash_bootstrap_components as dbc
 
 from config import SIGNAL_TIMEFRAME, INDICATOR_DESCRIPTIONS, load_user_assets, get_default_config
 from .config_modal import create_config_modal
+from components.summary_table import create_summary_section
 
 
 def get_display_options():
@@ -39,6 +40,7 @@ def create_main_layout():
         dcc.Store(id='full-data-store', data={}),
         dcc.Store(id='zoom-range-store', data=None),
         dcc.Store(id='performance-store', data={}),
+        dcc.Store(id='summary-store', data={}),
         
         # Modal de configuration
         create_config_modal(),
@@ -73,6 +75,11 @@ def create_main_layout():
                         {'label': '1 An', 'value': '1y'},
                         {'label': '2 Ans', 'value': '2y'},
                         {'label': '5 Ans', 'value': '5y'},
+                        {'label': '10 Ans', 'value': '10y'},
+                        {'label': '15 Ans', 'value': '15y'},
+                        {'label': '20 Ans', 'value': '20y'},
+                        {'label': '25 Ans', 'value': '25y'},
+                        {'label': 'Maximum', 'value': 'max'},
                     ],
                     value='2y',
                     clearable=False
@@ -119,6 +126,9 @@ def create_main_layout():
         ], className="mb-2"),
         
         html.Div(id='save-status', className="text-center mb-1"),
+
+        # === 0. TABLEAU RÉCAPITULATIF DES ACTIFS (NOUVEAU) ===
+        create_summary_section(),
 
         # === 1. SYNTHÈSE TECHNIQUE (COLLAPSIBLE) ===
         dbc.Card([
@@ -296,10 +306,10 @@ def create_main_layout():
             ),
         ], className="mb-3", color="dark", outline=True),
 
-        # === 4. GRAPHIQUES PRINCIPAUX ===
+        # === 5. GRAPHIQUES PRINCIPAUX ===
         html.Div(id='main-charts-container'),
 
-        # === 5. GRAPHIQUES TECHNIQUES DÉTAILLÉS (COLLAPSE) ===
+        # === 6. GRAPHIQUES TECHNIQUES DÉTAILLÉS (COLLAPSE) ===
         dbc.Card([
             dbc.CardHeader([
                 dbc.Button(

@@ -33,3 +33,7 @@ from .strategy_charts import (
     create_strategies_section,
     HOLDING_COLORS
 )
+from .summary_table import (
+    create_assets_summary_table,
+    create_summary_section
+)

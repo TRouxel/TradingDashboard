@@ -56,7 +56,10 @@ def period_to_days(period_str):
         '2y': 730,
         '5y': 1825,
         '10y': 3650,
-        'max': 10000
+        '15y': 5475,
+        '20y': 7300,
+        '25y': 9125,
+        'max': 15000  # ~40 ans max
     }
     return mapping.get(period_str, 365)
 
@@ -70,9 +73,16 @@ def get_minimum_period(requested_period):
         return "2y"
     elif min_days_needed <= 1825:
         return "5y"
-    else:
+    elif min_days_needed <= 3650:
         return "10y"
-
+    elif min_days_needed <= 5475:
+        return "15y"
+    elif min_days_needed <= 7300:
+        return "20y"
+    elif min_days_needed <= 9125:
+        return "25y"
+    else:
+        return "max"
 
 def fetch_and_prepare_data(ticker, period="2y", return_full=False, config=None):
     """
