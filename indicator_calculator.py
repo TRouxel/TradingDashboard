@@ -1,13 +1,23 @@
 # indicator_calculator.py
+"""
+Module de calcul des indicateurs techniques.
+VERSION 2.4 - Correction du passage de config + debug amélioré
+"""
 import pandas as pd
 import pandas_ta as ta
 from config import (
     RSI, STOCHASTIC, MOVING_AVERAGES, MACD, ADX, BOLLINGER,
-    SIGNAL_WEIGHTS, DECISION, TREND, DIVERGENCE, SIGNAL_TIMEFRAME,
+    SIGNAL_WEIGHTS, INDIVIDUAL_WEIGHTS, COMBINATION_WEIGHTS,
+    DECISION, TREND, DIVERGENCE, SIGNAL_TIMEFRAME,
     get_default_config
 )
 
-# Patterns qui sont TOUJOURS neutres, peu importe la valeur retournée
+# === FLAG DE DEBUG ===
+DEBUG_RECOMMENDATIONS = True  # Mettre à True pour voir les détails
+DEBUG_CONFIG = True  # Debug de la config reçue
+
+
+# Patterns qui sont TOUJOURS neutres
 NEUTRAL_PATTERNS = {
     'DOJI', 'DOJISTAR', 'LONGLEGGEDOJI', 'LONGLEGGEDDOJI',
     'SPINNINGTOP', 'HIGHWAVE', 'RICKSHAWMAN',
@@ -17,10 +27,7 @@ NEUTRAL_PATTERNS = {
 
 
 def get_pattern_with_direction(candle_patterns_row):
-    """
-    Analyse une ligne de patterns et retourne (pattern_name, direction).
-    Direction: 'bullish', 'bearish', ou 'neutral'
-    """
+    """Analyse une ligne de patterns et retourne (pattern_name, direction)."""
     non_zero = candle_patterns_row[candle_patterns_row != 0]
     
     if len(non_zero) == 0:
@@ -45,11 +52,20 @@ def get_pattern_with_direction(candle_patterns_row):
 
 
 def calculate_all_indicators(df, config=None):
-    """
-    Calcule tous les indicateurs techniques et les ajoute au DataFrame.
-    """
+    """Calcule tous les indicateurs techniques."""
     if config is None:
         config = get_default_config()
+        if DEBUG_CONFIG:
+            print("⚠️ calculate_all_indicators appelé avec config=None, utilisation des valeurs par défaut")
+    else:
+        if DEBUG_CONFIG:
+            ind_weights = config.get('individual_weights', {})
+            print(f"✅ calculate_all_indicators appelé avec config personnalisée")
+            print(f"   individual_weights reçus: rsi_extreme={ind_weights.get('rsi_extreme')}, "
+                  f"stoch_cross={ind_weights.get('stoch_cross')}, "
+                  f"macd_histogram={ind_weights.get('macd_histogram')}, "
+                  f"rsi_divergence={ind_weights.get('rsi_divergence')}, "
+                  f"adx_direction={ind_weights.get('adx_direction')}")
     
     rsi_cfg = config.get('rsi', RSI)
     stoch_cfg = config.get('stochastic', STOCHASTIC)
@@ -63,25 +79,18 @@ def calculate_all_indicators(df, config=None):
     df.ta.rsi(length=rsi_cfg['period'], append=True)
     
     # === BANDES DE BOLLINGER ===
-    bb_period = bb_cfg['period']
-    bb_std = bb_cfg['std_dev']
-    df.ta.bbands(length=bb_period, std=bb_std, append=True)
+    df.ta.bbands(length=bb_cfg['period'], std=bb_cfg['std_dev'], append=True)
     
     # === INDICATEURS DE TENDANCE ===
     df.ta.sma(length=ma_cfg['sma_short'], append=True)
     df.ta.sma(length=ma_cfg['sma_medium'], append=True)
     df.ta.sma(length=ma_cfg['sma_long'], append=True)
-    
     df.ta.ema(length=ma_cfg['ema_fast'], append=True)
     df.ta.ema(length=ma_cfg['ema_slow'], append=True)
-    
     df.ta.macd(fast=macd_cfg['fast'], slow=macd_cfg['slow'], signal=macd_cfg['signal'], append=True)
     df.ta.adx(length=adx_cfg['period'], append=True)
     
-    # Renommer les colonnes - avec gestion du format float pour std_dev
-    # pandas_ta utilise le format exact du paramètre (2.0 reste 2.0, pas 2)
-    bb_std_str = str(bb_std)  # "2.0" ou "2" selon la config
-    
+    # Renommer les colonnes
     rename_map = {
         f'STOCHk_{stoch_cfg["k_period"]}_{stoch_cfg["d_period"]}_3': 'stochastic_k',
         f'STOCHd_{stoch_cfg["k_period"]}_{stoch_cfg["d_period"]}_3': 'stochastic_d',
@@ -99,30 +108,23 @@ def calculate_all_indicators(df, config=None):
         f'DMN_{adx_cfg["period"]}': 'di_minus',
     }
     
-    # Chercher les colonnes Bollinger avec différents formats possibles
-    bb_columns_found = {}
+    # Chercher les colonnes Bollinger
     for col in df.columns:
         if col.startswith('BBL_'):
-            bb_columns_found['bb_lower'] = col
+            rename_map[col] = 'bb_lower'
         elif col.startswith('BBM_'):
-            bb_columns_found['bb_middle'] = col
+            rename_map[col] = 'bb_middle'
         elif col.startswith('BBU_'):
-            bb_columns_found['bb_upper'] = col
+            rename_map[col] = 'bb_upper'
         elif col.startswith('BBB_'):
-            bb_columns_found['bb_bandwidth'] = col
+            rename_map[col] = 'bb_bandwidth'
         elif col.startswith('BBP_'):
-            bb_columns_found['bb_percent'] = col
-    
-    # Ajouter les colonnes Bollinger trouvées au rename_map
-    for new_name, old_name in bb_columns_found.items():
-        rename_map[old_name] = new_name
+            rename_map[col] = 'bb_percent'
     
     existing_cols = {k: v for k, v in rename_map.items() if k in df.columns}
     df.rename(columns=existing_cols, inplace=True)
 
-    # Calculer le signal Bollinger
     df['bb_signal'] = calculate_bollinger_signal(df, config)
-
     df['trend'] = calculate_trend(df, config)
     
     divergence_cfg = config.get('divergence', DIVERGENCE)
@@ -143,19 +145,22 @@ def calculate_all_indicators(df, config=None):
     df['pattern_direction'] = directions_list
 
     signal_timeframe = config.get('signal_timeframe', 1)
-    df['recommendation'], df['conviction'] = zip(*df.apply(
-        lambda row: calculate_recommendation_v3(row, df, config, signal_timeframe), 
+    
+    # Passer explicitement la config à chaque appel
+    results = df.apply(
+        lambda row: calculate_recommendation_v4(row, df, config, signal_timeframe), 
         axis=1
-    ))
+    )
+    
+    df['recommendation'] = [r[0] for r in results]
+    df['conviction'] = [r[1] for r in results]
+    df['active_combinations'] = [r[2] for r in results]
 
     return df
 
 
 def calculate_bollinger_signal(df, config=None):
-    """
-    Calcule le signal Bollinger pour chaque ligne.
-    Retourne: 'lower_touch', 'upper_touch', 'squeeze', ou 'neutral'
-    """
+    """Calcule le signal Bollinger pour chaque ligne."""
     if config is None:
         config = get_default_config()
     
@@ -176,28 +181,22 @@ def calculate_bollinger_signal(df, config=None):
             signals.append('neutral')
             continue
         
-        # Calculer la position dans les bandes (0 = bande basse, 1 = bande haute)
         bb_range = bb_upper - bb_lower
-        if bb_range > 0:
-            position = (close - bb_lower) / bb_range
-        else:
-            position = 0.5
+        position = (close - bb_lower) / bb_range if bb_range > 0 else 0.5
         
-        # Détecter un squeeze (bandes très resserrées)
         if bb_bandwidth is not None and bb_middle is not None and bb_middle > 0:
             bandwidth_pct = bb_bandwidth / bb_middle * 100
             if bandwidth_pct < squeeze_threshold * 100:
                 signals.append('squeeze')
                 continue
         
-        # Détecter les touches de bandes
-        if position <= 0.05:  # Proche de la bande basse (5%)
+        if position <= 0.05:
             signals.append('lower_touch')
-        elif position >= 0.95:  # Proche de la bande haute (95%)
+        elif position >= 0.95:
             signals.append('upper_touch')
-        elif position <= 0.20:  # Zone basse (20%)
+        elif position <= 0.20:
             signals.append('lower_zone')
-        elif position >= 0.80:  # Zone haute (80%)
+        elif position >= 0.80:
             signals.append('upper_zone')
         else:
             signals.append('neutral')
@@ -206,9 +205,7 @@ def calculate_bollinger_signal(df, config=None):
 
 
 def calculate_trend(df, config=None):
-    """
-    Détermine la tendance basée sur les moyennes mobiles et l'ADX.
-    """
+    """Détermine la tendance basée sur les moyennes mobiles et l'ADX."""
     if config is None:
         config = get_default_config()
     
@@ -278,13 +275,9 @@ def calculate_trend(df, config=None):
     
     return trends
 
+
 def detect_rsi_divergence(df, lookback=14, config=None):
-    """
-    Détecte les divergences entre le prix et le RSI - VERSION CORRIGÉE.
-    
-    AMÉLIORATION: Détection basée sur les creux/sommets locaux réels,
-    pas sur une simple comparaison de 2 points.
-    """
+    """Détecte les divergences entre le prix et le RSI."""
     if config is None:
         config = get_default_config()
     
@@ -294,33 +287,25 @@ def detect_rsi_divergence(df, lookback=14, config=None):
     
     divergences = ['none'] * len(df)
     
-    # Fonction pour trouver les creux locaux
     def find_local_min(series, idx, window=5):
-        """Vérifie si l'index est un creux local."""
         if idx < window or idx >= len(series) - window:
             return False
-        
         val = series.iloc[idx]
         left_vals = series.iloc[idx-window:idx]
         right_vals = series.iloc[idx+1:idx+window+1]
-        
         return val <= left_vals.min() and val <= right_vals.min()
     
-    # Fonction pour trouver les sommets locaux
     def find_local_max(series, idx, window=5):
-        """Vérifie si l'index est un sommet local."""
         if idx < window or idx >= len(series) - window:
             return False
-        
         val = series.iloc[idx]
         left_vals = series.iloc[idx-window:idx]
         right_vals = series.iloc[idx+1:idx+window+1]
-        
         return val >= left_vals.max() and val >= right_vals.max()
     
-    window = 5  # Fenêtre pour détecter les extremums locaux
-    min_distance = 5  # Distance minimum entre deux creux/sommets
-    max_distance = lookback * 2  # Distance maximum
+    window = 5
+    min_distance = 5
+    max_distance = lookback * 2
     
     for i in range(lookback * 2 + window, len(df) - window):
         try:
@@ -330,10 +315,7 @@ def detect_rsi_divergence(df, lookback=14, config=None):
             if pd.isna(rsi):
                 continue
             
-            # === DIVERGENCE HAUSSIÈRE ===
-            # Le prix fait un nouveau creux mais le RSI fait un creux plus haut
             if find_local_min(df['Close'], i, window) and rsi < rsi_low:
-                # Chercher le creux précédent
                 for j in range(i - min_distance, max(i - max_distance, lookback), -1):
                     if find_local_min(df['Close'], j, window):
                         prev_price = df['Close'].iloc[j]
@@ -342,15 +324,11 @@ def detect_rsi_divergence(df, lookback=14, config=None):
                         if pd.isna(prev_rsi):
                             continue
                         
-                        # Prix fait nouveau creux, RSI fait creux plus haut = divergence haussière
                         if price < prev_price and rsi > prev_rsi:
                             divergences[i] = 'bullish'
                             break
             
-            # === DIVERGENCE BAISSIÈRE ===
-            # Le prix fait un nouveau sommet mais le RSI fait un sommet plus bas
             elif find_local_max(df['Close'], i, window) and rsi > rsi_high:
-                # Chercher le sommet précédent
                 for j in range(i - min_distance, max(i - max_distance, lookback), -1):
                     if find_local_max(df['Close'], j, window):
                         prev_price = df['Close'].iloc[j]
@@ -359,7 +337,6 @@ def detect_rsi_divergence(df, lookback=14, config=None):
                         if pd.isna(prev_rsi):
                             continue
                         
-                        # Prix fait nouveau sommet, RSI fait sommet plus bas = divergence baissière
                         if price > prev_price and rsi < prev_rsi:
                             divergences[i] = 'bearish'
                             break
@@ -369,39 +346,538 @@ def detect_rsi_divergence(df, lookback=14, config=None):
     
     return divergences
 
-def calculate_recommendation_v3(row, df, config=None, signal_timeframe=1):
+
+# ============================================
+# === FONCTIONS HELPER ===
+# ============================================
+
+def _safe_get(row, key, default=None):
+    """Récupère une valeur de manière sécurisée."""
+    keys_to_try = [key]
+    if key == 'close':
+        keys_to_try.append('Close')
+    elif key == 'Close':
+        keys_to_try.append('close')
+    
+    for k in keys_to_try:
+        val = row.get(k, None)
+        if val is not None and not (isinstance(val, float) and pd.isna(val)):
+            return val
+    return default
+
+
+def _safe_num(row, key, default=0):
+    """Récupère une valeur numérique de manière sécurisée."""
+    val = _safe_get(row, key, default)
+    if val is None:
+        return default
+    try:
+        result = float(val)
+        return default if pd.isna(result) else result
+    except (ValueError, TypeError):
+        return default
+
+
+def _get_active_indicator_flags(config):
     """
-    VERSION 3 : Logique de recommandation ÉQUILIBRÉE entre achat et vente.
-    Inclut maintenant les Bandes de Bollinger.
+    Retourne un dictionnaire indiquant quels indicateurs sont actifs (poids > 0).
+    """
+    ind_weights = config.get('individual_weights', INDIVIDUAL_WEIGHTS)
+    comb_weights = config.get('combination_weights', COMBINATION_WEIGHTS)
+    
+    # Debug
+    if DEBUG_CONFIG:
+        print(f"   _get_active_indicator_flags - ind_weights keys: {list(ind_weights.keys())[:5]}...")
+        print(f"   rsi_extreme={ind_weights.get('rsi_extreme', 'MISSING')}, "
+              f"rsi_divergence={ind_weights.get('rsi_divergence', 'MISSING')}")
+    
+    # Un indicateur est actif si :
+    # 1. Son poids individuel est > 0
+    # OU
+    # 2. Il est utilisé dans une combinaison active
+    
+    # D'abord, vérifier les poids individuels
+    rsi_active = (ind_weights.get('rsi_extreme', 0) > 0 or 
+                  ind_weights.get('rsi_exit_zone', 0) > 0)
+    
+    stoch_active = (ind_weights.get('stoch_cross', 0) > 0 or 
+                    ind_weights.get('stoch_extreme', 0) > 0)
+    
+    macd_active = (ind_weights.get('macd_cross', 0) > 0 or 
+                   ind_weights.get('macd_histogram', 0) > 0)
+    
+    trend_active = (ind_weights.get('trend_strong', 0) > 0 or 
+                    ind_weights.get('trend_weak', 0) > 0)
+    
+    pattern_active = ind_weights.get('pattern_signal', 0) > 0
+    
+    divergence_active = ind_weights.get('rsi_divergence', 0) > 0
+    
+    bollinger_active = (ind_weights.get('bollinger_touch', 0) > 0 or 
+                        ind_weights.get('bollinger_zone', 0) > 0)
+    
+    adx_active = ind_weights.get('adx_direction', 0) > 0
+    
+    # Ensuite, vérifier si des combinaisons actives utilisent ces indicateurs
+    # (une combinaison peut activer un indicateur même si son poids individuel est 0)
+    
+    # Combinaisons qui utilisent RSI
+    rsi_combos = ['rsi_low_stoch_bullish', 'rsi_high_stoch_bearish', 'bollinger_low_rsi_low', 
+                  'bollinger_high_rsi_high', 'macd_cross_rsi_low', 'macd_cross_bearish_rsi_high',
+                  'pattern_bullish_rsi_low', 'pattern_bearish_rsi_high', 'triple_confirm_buy',
+                  'triple_confirm_sell', 'rsi_exit_oversold_stoch', 'rsi_exit_overbought_stoch',
+                  'stoch_cross_bullish_rsi_low', 'stoch_cross_bearish_rsi_high']
+    
+    # Combinaisons qui utilisent Stoch
+    stoch_combos = ['divergence_bullish_stoch', 'divergence_bearish_stoch', 'rsi_low_stoch_bullish',
+                    'rsi_high_stoch_bearish', 'bollinger_low_stoch_bullish', 'bollinger_high_stoch_bearish',
+                    'triple_confirm_buy', 'triple_confirm_sell', 'rsi_exit_oversold_stoch',
+                    'rsi_exit_overbought_stoch', 'stoch_cross_bullish_rsi_low', 'stoch_cross_bearish_rsi_high']
+    
+    # Combinaisons qui utilisent MACD
+    macd_combos = ['macd_cross_rsi_low', 'macd_cross_bearish_rsi_high', 'macd_bullish_trend_bullish',
+                   'macd_bearish_trend_bearish', 'macd_positive_trend_bullish', 'macd_negative_trend_bearish',
+                   'triple_confirm_buy', 'triple_confirm_sell', 'price_below_mas_macd_negative']
+    
+    # Combinaisons qui utilisent Divergence
+    divergence_combos = ['divergence_bullish_stoch', 'divergence_bearish_stoch']
+    
+    # Combinaisons qui utilisent Bollinger
+    bollinger_combos = ['bollinger_low_rsi_low', 'bollinger_high_rsi_high', 
+                        'bollinger_low_stoch_bullish', 'bollinger_high_stoch_bearish']
+    
+    # Combinaisons qui utilisent ADX
+    adx_combos = ['adx_strong_di_plus', 'adx_strong_di_minus']
+    
+    # Combinaisons qui utilisent Trend
+    trend_combos = ['macd_bullish_trend_bullish', 'macd_bearish_trend_bearish',
+                    'macd_positive_trend_bullish', 'macd_negative_trend_bearish',
+                    'pattern_bullish_trend_bullish', 'pattern_bearish_trend_bearish']
+    
+    # Combinaisons qui utilisent Pattern
+    pattern_combos = ['pattern_bullish_rsi_low', 'pattern_bearish_rsi_high',
+                      'pattern_bullish_trend_bullish', 'pattern_bearish_trend_bearish']
+    
+    # Vérifier si des combinaisons sont actives
+    def any_combo_active(combo_list):
+        return any(comb_weights.get(c, 0) > 0 for c in combo_list)
+    
+    flags = {
+        'rsi': rsi_active or any_combo_active(rsi_combos),
+        'stoch': stoch_active or any_combo_active(stoch_combos),
+        'macd': macd_active or any_combo_active(macd_combos),
+        'trend': trend_active or any_combo_active(trend_combos),
+        'pattern': pattern_active or any_combo_active(pattern_combos),
+        'divergence': divergence_active or any_combo_active(divergence_combos),
+        'bollinger': bollinger_active or any_combo_active(bollinger_combos),
+        'adx': adx_active or any_combo_active(adx_combos),
+    }
+    
+    if DEBUG_CONFIG:
+        print(f"   Computed flags: {flags}")
+    
+    return flags
+
+
+# ============================================
+# === DÉTECTION DES COMBINAISONS ===
+# ============================================
+
+def detect_active_combinations(row, row_prev, config, active_flags):
+    """
+    Détecte les combinaisons actives.
+    Ne retourne que les combinaisons dont le poids > 0.
+    """
+    active = {'buy': [], 'sell': []}
+    
+    comb_weights = config.get('combination_weights', COMBINATION_WEIGHTS)
+    rsi_cfg = config.get('rsi', RSI)
+    adx_cfg = config.get('adx', ADX)
+    
+    # Extraire les valeurs
+    rsi = _safe_num(row, 'rsi', 50)
+    rsi_prev = _safe_num(row_prev, 'rsi', 50) if row_prev else 50
+    stoch_k = _safe_num(row, 'stochastic_k', 50)
+    stoch_d = _safe_num(row, 'stochastic_d', 50)
+    stoch_k_prev = _safe_num(row_prev, 'stochastic_k', 50) if row_prev else 50
+    stoch_d_prev = _safe_num(row_prev, 'stochastic_d', 50) if row_prev else 50
+    macd = _safe_num(row, 'macd', 0)
+    macd_signal_val = _safe_num(row, 'macd_signal', 0)
+    macd_hist = _safe_num(row, 'macd_histogram', 0)
+    macd_prev = _safe_num(row_prev, 'macd', 0) if row_prev else 0
+    macd_signal_prev = _safe_num(row_prev, 'macd_signal', 0) if row_prev else 0
+    trend = _safe_get(row, 'trend', 'neutral')
+    pattern_dir = _safe_get(row, 'pattern_direction', 'neutral')
+    rsi_div = _safe_get(row, 'rsi_divergence', 'none')
+    bb_signal = _safe_get(row, 'bb_signal', 'neutral')
+    adx = _safe_num(row, 'adx', 0)
+    di_plus = _safe_num(row, 'di_plus', 0)
+    di_minus = _safe_num(row, 'di_minus', 0)
+    close = _safe_num(row, 'close', 0) or _safe_num(row, 'Close', 0)
+    sma_20 = _safe_num(row, 'sma_20', None)
+    sma_50 = _safe_num(row, 'sma_50', None)
+    
+    # Croisements
+    stoch_bullish_cross = stoch_k_prev <= stoch_d_prev and stoch_k > stoch_d
+    stoch_bearish_cross = stoch_k_prev >= stoch_d_prev and stoch_k < stoch_d
+    macd_bullish_cross = macd_prev <= macd_signal_prev and macd > macd_signal_val
+    macd_bearish_cross = macd_prev >= macd_signal_prev and macd < macd_signal_val
+    
+    # === COMBINAISONS D'ACHAT ===
+    # Chaque combinaison vérifie UNIQUEMENT son propre poids > 0
+    
+    # Divergence Haussière + Stoch
+    if rsi_div == 'bullish' and stoch_k > stoch_d:
+        if comb_weights.get('divergence_bullish_stoch', 0) > 0:
+            active['buy'].append('divergence_bullish_stoch')
+    
+    # Triple Confirm Achat
+    if rsi < 50 and stoch_k > stoch_d and macd_hist > 0:
+        if comb_weights.get('triple_confirm_buy', 0) > 0:
+            active['buy'].append('triple_confirm_buy')
+    
+    # MACD Croisement Haussier + RSI Bas
+    if macd_bullish_cross and rsi < 50:
+        if comb_weights.get('macd_cross_rsi_low', 0) > 0:
+            active['buy'].append('macd_cross_rsi_low')
+    
+    # Bollinger Basse + RSI Bas
+    if bb_signal in ['lower_touch', 'lower_zone'] and rsi < 40:
+        if comb_weights.get('bollinger_low_rsi_low', 0) > 0:
+            active['buy'].append('bollinger_low_rsi_low')
+    
+    # RSI Bas + Stoch Haussier
+    if rsi < 45 and stoch_k > stoch_d:
+        if comb_weights.get('rsi_low_stoch_bullish', 0) > 0:
+            active['buy'].append('rsi_low_stoch_bullish')
+    
+    # Pattern Haussier + RSI Bas
+    if pattern_dir == 'bullish' and rsi < 45:
+        if comb_weights.get('pattern_bullish_rsi_low', 0) > 0:
+            active['buy'].append('pattern_bullish_rsi_low')
+    
+    # Bollinger Basse + Stoch Haussier
+    if bb_signal in ['lower_touch', 'lower_zone'] and stoch_k > stoch_d:
+        if comb_weights.get('bollinger_low_stoch_bullish', 0) > 0:
+            active['buy'].append('bollinger_low_stoch_bullish')
+    
+    # ADX Fort + DI+ Dominant
+    if adx > adx_cfg.get('strong', 25) and di_plus > di_minus:
+        if comb_weights.get('adx_strong_di_plus', 0) > 0:
+            active['buy'].append('adx_strong_di_plus')
+    
+    # MACD Haussier + Tendance Haussière
+    if macd > macd_signal_val and macd_hist > 0 and trend in ['bullish', 'strong_bullish']:
+        if comb_weights.get('macd_bullish_trend_bullish', 0) > 0:
+            active['buy'].append('macd_bullish_trend_bullish')
+    
+    # MACD Positif + Tendance Haussière
+    if macd_hist > 0 and trend in ['bullish', 'strong_bullish']:
+        if comb_weights.get('macd_positive_trend_bullish', 0) > 0:
+            active['buy'].append('macd_positive_trend_bullish')
+    
+    # Pattern Haussier + Tendance Haussière
+    if pattern_dir == 'bullish' and trend in ['bullish', 'strong_bullish']:
+        if comb_weights.get('pattern_bullish_trend_bullish', 0) > 0:
+            active['buy'].append('pattern_bullish_trend_bullish')
+    
+    # Stoch Croisement Haussier + RSI Bas
+    if stoch_bullish_cross and rsi < 50:
+        if comb_weights.get('stoch_cross_bullish_rsi_low', 0) > 0:
+            active['buy'].append('stoch_cross_bullish_rsi_low')
+    
+    # RSI Sortie Survente + Stoch
+    oversold = rsi_cfg.get('oversold', 30)
+    if rsi_prev <= oversold and rsi > oversold and stoch_k > stoch_d:
+        if comb_weights.get('rsi_exit_oversold_stoch', 0) > 0:
+            active['buy'].append('rsi_exit_oversold_stoch')
+    
+    # === COMBINAISONS DE VENTE ===
+    
+    # Divergence Baissière + Stoch
+    if rsi_div == 'bearish' and stoch_k < stoch_d:
+        if comb_weights.get('divergence_bearish_stoch', 0) > 0:
+            active['sell'].append('divergence_bearish_stoch')
+    
+    # Triple Confirm Vente
+    if rsi > 50 and stoch_k < stoch_d and macd_hist < 0:
+        if comb_weights.get('triple_confirm_sell', 0) > 0:
+            active['sell'].append('triple_confirm_sell')
+    
+    # MACD Croisement Baissier + RSI Haut
+    if macd_bearish_cross and rsi > 50:
+        if comb_weights.get('macd_cross_bearish_rsi_high', 0) > 0:
+            active['sell'].append('macd_cross_bearish_rsi_high')
+    
+    # Bollinger Haute + RSI Haut
+    if bb_signal in ['upper_touch', 'upper_zone'] and rsi > 60:
+        if comb_weights.get('bollinger_high_rsi_high', 0) > 0:
+            active['sell'].append('bollinger_high_rsi_high')
+    
+    # RSI Haut + Stoch Baissier
+    if rsi > 55 and stoch_k < stoch_d:
+        if comb_weights.get('rsi_high_stoch_bearish', 0) > 0:
+            active['sell'].append('rsi_high_stoch_bearish')
+    
+    # Pattern Baissier + RSI Haut
+    if pattern_dir == 'bearish' and rsi > 55:
+        if comb_weights.get('pattern_bearish_rsi_high', 0) > 0:
+            active['sell'].append('pattern_bearish_rsi_high')
+    
+    # Bollinger Haute + Stoch Baissier
+    if bb_signal in ['upper_touch', 'upper_zone'] and stoch_k < stoch_d:
+        if comb_weights.get('bollinger_high_stoch_bearish', 0) > 0:
+            active['sell'].append('bollinger_high_stoch_bearish')
+    
+    # ADX Fort + DI- Dominant
+    if adx > adx_cfg.get('strong', 25) and di_minus > di_plus:
+        if comb_weights.get('adx_strong_di_minus', 0) > 0:
+            active['sell'].append('adx_strong_di_minus')
+    
+    # MACD Baissier + Tendance Baissière
+    if macd < macd_signal_val and macd_hist < 0 and trend in ['bearish', 'strong_bearish']:
+        if comb_weights.get('macd_bearish_trend_bearish', 0) > 0:
+            active['sell'].append('macd_bearish_trend_bearish')
+    
+    # MACD Négatif + Tendance Baissière
+    if macd_hist < 0 and trend in ['bearish', 'strong_bearish']:
+        if comb_weights.get('macd_negative_trend_bearish', 0) > 0:
+            active['sell'].append('macd_negative_trend_bearish')
+    
+    # Pattern Baissier + Tendance Baissière
+    if pattern_dir == 'bearish' and trend in ['bearish', 'strong_bearish']:
+        if comb_weights.get('pattern_bearish_trend_bearish', 0) > 0:
+            active['sell'].append('pattern_bearish_trend_bearish')
+    
+    # Stoch Croisement Baissier + RSI Haut
+    if stoch_bearish_cross and rsi > 50:
+        if comb_weights.get('stoch_cross_bearish_rsi_high', 0) > 0:
+            active['sell'].append('stoch_cross_bearish_rsi_high')
+    
+    # RSI Sortie Surachat + Stoch
+    overbought = rsi_cfg.get('overbought', 70)
+    if rsi_prev >= overbought and rsi < overbought and stoch_k < stoch_d:
+        if comb_weights.get('rsi_exit_overbought_stoch', 0) > 0:
+            active['sell'].append('rsi_exit_overbought_stoch')
+    
+    # Prix Sous MAs + MACD Négatif
+    if sma_20 and sma_50 and close < sma_20 and sma_20 < sma_50 and macd < 0:
+        if comb_weights.get('price_below_mas_macd_negative', 0) > 0:
+            active['sell'].append('price_below_mas_macd_negative')
+    
+    return active
+
+def calculate_individual_signals(row, config, active_flags):
+    """
+    Calcule les signaux des indicateurs individuels.
+    VERSION CORRIGÉE: Utilise DIRECTEMENT les poids de la config, sans vérifier active_flags.
+    """
+    ind_weights = config.get('individual_weights', {})
+    rsi_cfg = config.get('rsi', RSI)
+    stoch_cfg = config.get('stochastic', STOCHASTIC)
+    adx_cfg = config.get('adx', ADX)
+    
+    buy_score = 0
+    sell_score = 0
+    debug_contributions = []
+    
+    # Extraire les valeurs
+    rsi = _safe_num(row, 'rsi', 50)
+    stoch_k = _safe_num(row, 'stochastic_k', 50)
+    stoch_d = _safe_num(row, 'stochastic_d', 50)
+    macd = _safe_num(row, 'macd', 0)
+    macd_signal_val = _safe_num(row, 'macd_signal', 0)
+    macd_hist = _safe_num(row, 'macd_histogram', 0)
+    trend = _safe_get(row, 'trend', 'neutral')
+    pattern_dir = _safe_get(row, 'pattern_direction', 'neutral')
+    rsi_div = _safe_get(row, 'rsi_divergence', 'none')
+    bb_signal = _safe_get(row, 'bb_signal', 'neutral')
+    adx = _safe_num(row, 'adx', 0)
+    di_plus = _safe_num(row, 'di_plus', 0)
+    di_minus = _safe_num(row, 'di_minus', 0)
+    
+    # === DIVERGENCE RSI - PRIORITÉ HAUTE ===
+    # C'est le signal le plus fiable, on le traite EN PREMIER
+    div_weight = ind_weights.get('rsi_divergence', 0)
+    if div_weight > 0:
+        if rsi_div == 'bullish':
+            buy_score += div_weight
+            debug_contributions.append(f"RSI DIV BULLISH: +{div_weight} buy")
+        elif rsi_div == 'bearish':
+            sell_score += div_weight
+            debug_contributions.append(f"RSI DIV BEARISH: +{div_weight} sell")
+    
+    # === RSI ===
+    rsi_extreme_weight = ind_weights.get('rsi_extreme', 0)
+    rsi_exit_weight = ind_weights.get('rsi_exit_zone', 0)
+    
+    if rsi_extreme_weight > 0:
+        if rsi <= rsi_cfg.get('oversold', 30):
+            buy_score += rsi_extreme_weight
+            debug_contributions.append(f"RSI extreme oversold: +{rsi_extreme_weight} buy")
+        elif rsi >= rsi_cfg.get('overbought', 70):
+            sell_score += rsi_extreme_weight
+            debug_contributions.append(f"RSI extreme overbought: +{rsi_extreme_weight} sell")
+    
+    if rsi_exit_weight > 0:
+        if rsi_cfg.get('exit_oversold_min', 30) <= rsi <= rsi_cfg.get('exit_oversold_max', 40):
+            buy_score += rsi_exit_weight
+            debug_contributions.append(f"RSI exit oversold: +{rsi_exit_weight} buy")
+        elif rsi_cfg.get('exit_overbought_min', 60) <= rsi <= rsi_cfg.get('exit_overbought_max', 70):
+            sell_score += rsi_exit_weight
+            debug_contributions.append(f"RSI exit overbought: +{rsi_exit_weight} sell")
+    
+    # === STOCHASTIQUE ===
+    stoch_weight = ind_weights.get('stoch_cross', 0)
+    if stoch_weight > 0:
+        if stoch_k < stoch_cfg.get('oversold', 20) + 10 and stoch_k > stoch_d:
+            buy_score += stoch_weight
+            debug_contributions.append(f"Stoch bullish: +{stoch_weight} buy")
+        elif stoch_k > stoch_cfg.get('overbought', 80) - 10 and stoch_k < stoch_d:
+            sell_score += stoch_weight
+            debug_contributions.append(f"Stoch bearish: +{stoch_weight} sell")
+    
+    # === MACD ===
+    macd_weight = ind_weights.get('macd_cross', 0)
+    macd_hist_weight = ind_weights.get('macd_histogram', 0)
+    
+    if macd_weight > 0:
+        if macd > macd_signal_val and macd_hist > 0:
+            buy_score += macd_weight
+            debug_contributions.append(f"MACD bullish: +{macd_weight} buy")
+        elif macd < macd_signal_val and macd_hist < 0:
+            sell_score += macd_weight
+            debug_contributions.append(f"MACD bearish: +{macd_weight} sell")
+    
+    if macd_hist_weight > 0:
+        if macd_hist > 0:
+            buy_score += macd_hist_weight
+            debug_contributions.append(f"MACD hist+: +{macd_hist_weight} buy")
+        elif macd_hist < 0:
+            sell_score += macd_hist_weight
+            debug_contributions.append(f"MACD hist-: +{macd_hist_weight} sell")
+    
+    # === TENDANCE ===
+    trend_strong_weight = ind_weights.get('trend_strong', 0)
+    trend_weak_weight = ind_weights.get('trend_weak', 0)
+    
+    if trend == 'strong_bullish' and trend_strong_weight > 0:
+        buy_score += trend_strong_weight
+        debug_contributions.append(f"Trend strong bull: +{trend_strong_weight} buy")
+    elif trend == 'bullish' and trend_weak_weight > 0:
+        buy_score += trend_weak_weight
+        debug_contributions.append(f"Trend bull: +{trend_weak_weight} buy")
+    elif trend == 'strong_bearish' and trend_strong_weight > 0:
+        sell_score += trend_strong_weight
+        debug_contributions.append(f"Trend strong bear: +{trend_strong_weight} sell")
+    elif trend == 'bearish' and trend_weak_weight > 0:
+        sell_score += trend_weak_weight
+        debug_contributions.append(f"Trend bear: +{trend_weak_weight} sell")
+    
+    # === PATTERNS ===
+    pattern_weight = ind_weights.get('pattern_signal', 0)
+    if pattern_weight > 0:
+        if pattern_dir == 'bullish':
+            buy_score += pattern_weight
+            debug_contributions.append(f"Pattern bullish: +{pattern_weight} buy")
+        elif pattern_dir == 'bearish':
+            sell_score += pattern_weight
+            debug_contributions.append(f"Pattern bearish: +{pattern_weight} sell")
+    
+    # === BOLLINGER ===
+    bb_touch_weight = ind_weights.get('bollinger_touch', 0)
+    bb_zone_weight = ind_weights.get('bollinger_zone', 0)
+    
+    if bb_touch_weight > 0:
+        if bb_signal == 'lower_touch':
+            buy_score += bb_touch_weight
+            debug_contributions.append(f"BB lower touch: +{bb_touch_weight} buy")
+        elif bb_signal == 'upper_touch':
+            sell_score += bb_touch_weight
+            debug_contributions.append(f"BB upper touch: +{bb_touch_weight} sell")
+    
+    if bb_zone_weight > 0:
+        if bb_signal == 'lower_zone':
+            buy_score += bb_zone_weight
+            debug_contributions.append(f"BB lower zone: +{bb_zone_weight} buy")
+        elif bb_signal == 'upper_zone':
+            sell_score += bb_zone_weight
+            debug_contributions.append(f"BB upper zone: +{bb_zone_weight} sell")
+    
+    # === ADX/DI ===
+    adx_weight = ind_weights.get('adx_direction', 0)
+    if adx_weight > 0 and adx > adx_cfg.get('weak', 20):
+        if di_plus > di_minus:
+            buy_score += adx_weight
+            debug_contributions.append(f"ADX DI+: +{adx_weight} buy")
+        else:
+            sell_score += adx_weight
+            debug_contributions.append(f"ADX DI-: +{adx_weight} sell")
+    
+    return buy_score, sell_score, debug_contributions
+
+def calculate_combination_signals(active_combinations, config):
+    """Calcule le score basé sur les combinaisons actives."""
+    comb_weights = config.get('combination_weights', COMBINATION_WEIGHTS)
+    decision_cfg = config.get('decision', DECISION)
+    bonus = decision_cfg.get('combination_bonus', 1.3)
+    
+    buy_score = 0
+    sell_score = 0
+    
+    for combo_name in active_combinations.get('buy', []):
+        weight = comb_weights.get(combo_name, 0)
+        buy_score += weight
+    
+    for combo_name in active_combinations.get('sell', []):
+        weight = comb_weights.get(combo_name, 0)
+        sell_score += weight
+    
+    num_buy = len(active_combinations.get('buy', []))
+    num_sell = len(active_combinations.get('sell', []))
+    
+    if num_buy >= 2:
+        buy_score *= (1 + (bonus - 1) * min(num_buy - 1, 2) / 2)
+    if num_sell >= 2:
+        sell_score *= (1 + (bonus - 1) * min(num_sell - 1, 2) / 2)
+    
+    return buy_score, sell_score, num_buy, num_sell
+
+def calculate_recommendation_v4(row, df, config=None, signal_timeframe=1):
+    """
+    VERSION 4.5 : Strictement basé sur les poids configurés.
+    CORRECTION: Afficher les seuils reçus pour debug.
     """
     if config is None:
         config = get_default_config()
     
     if pd.isna(row.get('stochastic_k')) or pd.isna(row.get('rsi')):
-        return 'Neutre', 0
+        return 'Neutre', 0, []
     
-    rsi_cfg = config.get('rsi', RSI)
-    stoch_cfg = config.get('stochastic', STOCHASTIC)
-    weights = config.get('signal_weights', SIGNAL_WEIGHTS)
-    decision = config.get('decision', DECISION)
-    adx_cfg = config.get('adx', ADX)
+    decision_cfg = config.get('decision', DECISION)
     
-    stoch_k = row['stochastic_k']
-    stoch_d = row['stochastic_d']
-    rsi = row['rsi']
-    trend = row.get('trend', 'neutral')
-    macd = row.get('macd', 0)
-    macd_signal = row.get('macd_signal', 0)
-    macd_hist = row.get('macd_histogram', 0)
-    pattern_dir = row.get('pattern_direction', 'neutral')
-    rsi_div = row.get('rsi_divergence', 'none')
-    adx = row.get('adx', 20)
-    di_plus = row.get('di_plus', 25)
-    di_minus = row.get('di_minus', 25)
-    bb_signal = row.get('bb_signal', 'neutral')
+    # DEBUG: Afficher les seuils utilisés (une seule fois par run)
+    if DEBUG_RECOMMENDATIONS:
+        # Récupérer la date pour identifier la ligne
+        date_val = row.get('Date', row.get('date', 'N/A'))
+        # Afficher seulement pour la dernière ligne (éviter le spam)
+        # On peut vérifier si c'est la dernière ligne du DataFrame
+        pass  # Le debug sera affiché plus bas
     
-    conviction_achat = 0
-    conviction_vente = 0
+    # Récupérer les flags d'indicateurs actifs
+    active_flags = _get_active_indicator_flags(config)
+    
+    # Récupérer la ligne précédente
+    row_prev = None
+    if row.name in df.index:
+        try:
+            current_idx = df.index.get_loc(row.name)
+            if current_idx > 0:
+                row_prev = df.iloc[current_idx - 1].to_dict()
+        except:
+            pass
+    
+    row_dict = row.to_dict()
     
     # === ANALYSE MULTI-TIMEFRAME ===
     if signal_timeframe > 1 and row.name in df.index:
@@ -410,189 +886,107 @@ def calculate_recommendation_v3(row, df, config=None, signal_timeframe=1):
             start_idx = max(0, current_idx - signal_timeframe + 1)
             window = df.iloc[start_idx:current_idx + 1]
             
-            rsi = window['rsi'].mean() if 'rsi' in window else rsi
-            stoch_k = window['stochastic_k'].mean() if 'stochastic_k' in window else stoch_k
-            stoch_d = window['stochastic_d'].mean() if 'stochastic_d' in window else stoch_d
-            
-            patterns_in_window = window[window['pattern_direction'] != 'neutral']['pattern_direction']
-            if len(patterns_in_window) > 0:
-                pattern_dir = patterns_in_window.mode().iloc[0] if len(patterns_in_window.mode()) > 0 else 'neutral'
-            
-            divs_in_window = window[window['rsi_divergence'] != 'none']['rsi_divergence']
-            if len(divs_in_window) > 0:
-                rsi_div = divs_in_window.iloc[-1]
-            
-            # Bollinger signals dans la fenêtre
-            bb_signals_in_window = window[window['bb_signal'].isin(['lower_touch', 'upper_touch'])]['bb_signal']
-            if len(bb_signals_in_window) > 0:
-                bb_signal = bb_signals_in_window.iloc[-1]
-                
+            row_dict['rsi'] = window['rsi'].mean() if 'rsi' in window else row_dict.get('rsi')
+            row_dict['stochastic_k'] = window['stochastic_k'].mean() if 'stochastic_k' in window else row_dict.get('stochastic_k')
+            row_dict['stochastic_d'] = window['stochastic_d'].mean() if 'stochastic_d' in window else row_dict.get('stochastic_d')
         except Exception:
             pass
     
-    # ============================================
-    # === SIGNAUX D'ACHAT ===
-    # ============================================
+    # === 1. CALCULER LES SIGNAUX INDIVIDUELS ===
+    ind_buy, ind_sell, debug_contribs = calculate_individual_signals(row_dict, config, active_flags)
     
-    # 1. RSI en zone de survente ou sortie de survente
-    if rsi <= rsi_cfg['oversold']:
-        conviction_achat += weights.get('rsi_exit_oversold', 2) * 1.2
-    elif rsi_cfg['exit_oversold_min'] <= rsi <= rsi_cfg['exit_oversold_max']:
-        if stoch_k > stoch_d:
-            conviction_achat += weights.get('rsi_exit_oversold', 2)
-        else:
-            conviction_achat += weights.get('rsi_exit_oversold', 2) * 0.5
+    # === 2. DÉTECTER LES COMBINAISONS ACTIVES ===
+    active_combinations = detect_active_combinations(row_dict, row_prev, config, active_flags)
     
-    # 2. Stochastique : croisement haussier en zone basse
-    if stoch_k < stoch_cfg['oversold'] + 10:
-        if stoch_k > stoch_d:
-            conviction_achat += weights.get('stoch_bullish_cross', 1)
+    # === 3. CALCULER LES SIGNAUX DES COMBINAISONS ===
+    comb_buy, comb_sell, num_buy_combos, num_sell_combos = calculate_combination_signals(active_combinations, config)
     
-    # 3. MACD : signaux haussiers
-    if macd is not None and macd_signal is not None:
-        if macd > macd_signal and macd_hist > 0:
-            conviction_achat += weights.get('macd_bullish', 1)
-        elif macd_hist is not None and macd_hist > 0:
-            conviction_achat += weights.get('macd_histogram_positive', 0.5)
+    # === 4. COMBINER LES SCORES ===
+    has_any_combo = num_buy_combos > 0 or num_sell_combos > 0
     
-    # 4. Divergence RSI haussière
-    if rsi_div == 'bullish':
-        conviction_achat += weights.get('rsi_divergence', 2)
-    
-    # 5. Pattern de chandelier haussier
-    if pattern_dir == 'bullish':
-        conviction_achat += weights.get('pattern_bullish', 1.5)
-    
-    # 6. Bonus tendance haussière
-    if trend in ['bullish', 'strong_bullish']:
-        conviction_achat += weights.get('trend_bonus', 1)
-    
-    # 7. DI+ > DI- (momentum acheteur)
-    if di_plus > di_minus and adx > adx_cfg['weak']:
-        conviction_achat += 0.5
-    
-    # 8. BOLLINGER - Signal d'achat sur bande basse
-    if bb_signal == 'lower_touch':
-        conviction_achat += weights.get('bollinger_lower', 1.5)
-    elif bb_signal == 'lower_zone':
-        conviction_achat += weights.get('bollinger_lower', 1.5) * 0.5
-    
-    # ============================================
-    # === SIGNAUX DE VENTE ===
-    # ============================================
-    
-    # 1. RSI en zone de surachat ou sortie de surachat
-    if rsi >= rsi_cfg['overbought']:
-        conviction_vente += weights.get('rsi_exit_overbought', 2) * 1.2
-    elif rsi_cfg['exit_overbought_min'] <= rsi <= rsi_cfg['exit_overbought_max']:
-        if stoch_k < stoch_d:
-            conviction_vente += weights.get('rsi_exit_overbought', 2)
-        else:
-            conviction_vente += weights.get('rsi_exit_overbought', 2) * 0.5
-    
-    # 2. RSI déclinant depuis zone haute
-    if rsi > 50 and rsi < rsi_cfg['exit_overbought_min']:
-        if stoch_k < stoch_d:
-            conviction_vente += 0.8
-    
-    # 3. Stochastique : croisement baissier en zone haute
-    if stoch_k > stoch_cfg['overbought'] - 10:
-        if stoch_k < stoch_d:
-            conviction_vente += weights.get('stoch_bearish_cross', 1)
-    
-    # 4. Stochastique en retournement
-    if stoch_k > 50 and stoch_k < stoch_d:
-        conviction_vente += 0.5
-    
-    # 5. MACD : signaux baissiers
-    if macd is not None and macd_signal is not None:
-        if macd < macd_signal and macd_hist < 0:
-            conviction_vente += weights.get('macd_bearish', 1)
-        elif macd_hist is not None and macd_hist < 0:
-            conviction_vente += weights.get('macd_histogram_negative', 0.5)
-        
-        if macd < 0 and macd_signal < 0:
-            conviction_vente += 0.5
-    
-    # 6. Divergence RSI baissière
-    if rsi_div == 'bearish':
-        conviction_vente += weights.get('rsi_divergence', 2)
-    
-    # 7. Pattern de chandelier baissier
-    if pattern_dir == 'bearish':
-        conviction_vente += weights.get('pattern_bearish', 1.5)
-    
-    # 8. Bonus tendance baissière
-    if trend in ['bearish', 'strong_bearish']:
-        conviction_vente += weights.get('trend_bonus', 1)
-    
-    # 9. DI- > DI+ (momentum vendeur)
-    if di_minus > di_plus and adx > adx_cfg['weak']:
-        conviction_vente += 0.5
-    
-    # 10. Prix sous les moyennes mobiles clés
-    close = row.get('Close', 0)
-    sma_20 = row.get('sma_20')
-    sma_50 = row.get('sma_50')
-    
-    if sma_20 is not None and sma_50 is not None:
-        if close < sma_20 < sma_50:
-            conviction_vente += 0.7
-        elif close < sma_20:
-            conviction_vente += 0.3
-    
-    # 11. BOLLINGER - Signal de vente sur bande haute
-    if bb_signal == 'upper_touch':
-        conviction_vente += weights.get('bollinger_upper', 1.5)
-    elif bb_signal == 'upper_zone':
-        conviction_vente += weights.get('bollinger_upper', 1.5) * 0.5
-    
-    # ============================================
-    # === AJUSTEMENTS ET PÉNALITÉS ===
-    # ============================================
-    
-    # Pénalité légère pour signaux contre-tendance forte
-    against_penalty = decision.get('against_trend_penalty', 0.5)
-    if trend == 'strong_bullish' and conviction_vente > conviction_achat:
-        conviction_vente *= (1 - against_penalty * 0.3)
-    if trend == 'strong_bearish' and conviction_achat > conviction_vente:
-        conviction_achat *= (1 - against_penalty * 0.3)
-    
-    # Bonus si ADX confirme une tendance forte
-    adx_level = decision.get('adx_confirmation_level', 30)
-    adx_bonus = decision.get('adx_confirmation_bonus', 1.2)
-    if adx > adx_level:
-        if trend in ['bullish', 'strong_bullish'] and conviction_achat > conviction_vente:
-            conviction_achat *= adx_bonus
-        elif trend in ['bearish', 'strong_bearish'] and conviction_vente > conviction_achat:
-            conviction_vente *= adx_bonus
-    
-    # ============================================
-    # === DÉCISION FINALE ===
-    # ============================================
-    
-    seuil_minimum = decision.get('min_conviction_threshold', 2.5)
-    diff_minimum = decision.get('conviction_difference', 0.5)
-    max_conviction = decision.get('max_conviction', 5)
-    
-    conviction_achat = round(conviction_achat, 1)
-    conviction_vente = round(conviction_vente, 1)
-    
-    seuil_effectif = seuil_minimum * 0.8
-    
-    if conviction_achat >= seuil_effectif and conviction_achat > conviction_vente + diff_minimum:
-        return 'Acheter', min(int(round(conviction_achat)), max_conviction)
-    elif conviction_vente >= seuil_effectif and conviction_vente > conviction_achat + diff_minimum:
-        return 'Vendre', min(int(round(conviction_vente)), max_conviction)
+    if has_any_combo:
+        total_buy = ind_buy * 0.3 + comb_buy * 0.7
+        total_sell = ind_sell * 0.3 + comb_sell * 0.7
     else:
-        max_conv = max(conviction_achat, conviction_vente)
-        return 'Neutre', min(int(round(max_conv)), max_conviction)
-
+        total_buy = ind_buy
+        total_sell = ind_sell
+    
+    # === 5. AJUSTEMENTS ===
+    if active_flags['trend']:
+        trend = row_dict.get('trend', 'neutral')
+        against_penalty = decision_cfg.get('against_trend_penalty', 0.5)
+        if trend == 'strong_bullish' and total_sell > total_buy:
+            total_sell *= (1 - against_penalty * 0.4)
+        if trend == 'strong_bearish' and total_buy > total_sell:
+            total_buy *= (1 - against_penalty * 0.4)
+    
+    if active_flags['adx']:
+        adx = _safe_num(row_dict, 'adx', 20)
+        trend = row_dict.get('trend', 'neutral')
+        adx_level = decision_cfg.get('adx_confirmation_level', 30)
+        adx_bonus = decision_cfg.get('adx_confirmation_bonus', 1.2)
+        if adx > adx_level:
+            if trend in ['bullish', 'strong_bullish'] and total_buy > total_sell:
+                total_buy *= adx_bonus
+            elif trend in ['bearish', 'strong_bearish'] and total_sell > total_buy:
+                total_sell *= adx_bonus
+    
+    # === 6. DÉCISION FINALE ===
+    seuil_minimum = decision_cfg.get('min_conviction_threshold', 2.5)
+    diff_minimum = decision_cfg.get('conviction_difference', 0.5)
+    max_conviction = decision_cfg.get('max_conviction', 5)
+    min_combos = decision_cfg.get('min_combinations_for_signal', 1)
+    
+    total_buy = round(total_buy, 2)
+    total_sell = round(total_sell, 2)
+    
+    all_active = active_combinations.get('buy', []) + active_combinations.get('sell', [])
+    
+    # === DEBUG ===
+    if DEBUG_RECOMMENDATIONS and (total_buy > 0 or total_sell > 0):
+        date_str = row_dict.get('Date', row_dict.get('date', 'N/A'))
+        rsi_div = row_dict.get('rsi_divergence', 'none')
+        print(f"\n=== DEBUG {date_str} ===")
+        print(f"Active flags: {active_flags}")
+        print(f"RSI Divergence: {rsi_div}")
+        print(f"Individual contributions: {debug_contribs}")
+        print(f"ind_buy={ind_buy}, ind_sell={ind_sell}")
+        print(f"Active combos: {all_active}")
+        print(f"comb_buy={comb_buy}, comb_sell={comb_sell}")
+        print(f"total_buy={total_buy}, total_sell={total_sell}")
+        # IMPORTANT: Afficher les seuils RÉELLEMENT utilisés
+        print(f">>> SEUILS UTILISÉS: seuil={seuil_minimum}, diff={diff_minimum}, min_combos={min_combos}")
+    
+    # CORRECTION: Si aucune combinaison n'est configurée, ne pas exiger de combinaisons
+    comb_weights = config.get('combination_weights', {})
+    any_combo_configured = any(w > 0 for w in comb_weights.values())
+    effective_min_combos = min_combos if any_combo_configured else 0
+    
+    # Vérifier les conditions pour ACHAT
+    if total_buy >= seuil_minimum and total_buy > total_sell + diff_minimum:
+        if num_buy_combos >= effective_min_combos:
+            result = ('Acheter', min(int(round(total_buy)), max_conviction), all_active)
+            if DEBUG_RECOMMENDATIONS:
+                print(f">>> RESULT: {result}")
+            return result
+    
+    # Vérifier les conditions pour VENTE
+    if total_sell >= seuil_minimum and total_sell > total_buy + diff_minimum:
+        if num_sell_combos >= effective_min_combos:
+            result = ('Vendre', min(int(round(total_sell)), max_conviction), all_active)
+            if DEBUG_RECOMMENDATIONS:
+                print(f">>> RESULT: {result}")
+            return result
+    
+    # NEUTRE
+    max_conv = max(total_buy, total_sell)
+    if DEBUG_RECOMMENDATIONS and (total_buy > 0 or total_sell > 0):
+        print(f">>> RESULT: Neutre (buy={total_buy} < seuil={seuil_minimum} ou sell={total_sell} < seuil={seuil_minimum})")
+    
+    return 'Neutre', min(int(round(max_conv)), max_conviction), all_active
 
 def get_weekly_trend(df_daily):
-    """
-    Convertit les données daily en weekly et calcule la tendance weekly.
-    """
+    """Convertit les données daily en weekly et calcule la tendance weekly."""
     df_weekly = df_daily.resample('W').agg({
         'Open': 'first',
         'High': 'max',

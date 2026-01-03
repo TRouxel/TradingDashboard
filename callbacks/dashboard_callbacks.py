@@ -22,17 +22,27 @@ def register_dashboard_callbacks(app):
     """Enregistre les callbacks du dashboard."""
     
     # === CALLBACK 1: Chargement initial des données ===
+    # CORRECTION: Ajouter config-store comme Input pour recalculer quand la config change
     @app.callback(
         [Output('full-data-store', 'data'),
          Output('zoom-range-store', 'data', allow_duplicate=True)],
         [Input('asset-dropdown', 'value'),
          Input('period-dropdown', 'value'),
-         Input('config-store', 'data')],
+         Input('config-store', 'data')],  # <-- Ceci déclenche un recalcul quand la config change
         prevent_initial_call=True
     )
     def load_data(selected_asset, selected_period, config):
         if not selected_asset:
             return {}, None
+        
+        # DEBUG: Afficher la config reçue
+        if config:
+            dec_cfg = config.get('decision', {})
+            ind_cfg = config.get('individual_weights', {})
+            print(f"\n🔄 load_data appelé avec config:")
+            print(f"   seuil = {dec_cfg.get('min_conviction_threshold')}")
+            print(f"   min_combos = {dec_cfg.get('min_combinations_for_signal')}")
+            print(f"   rsi_divergence = {ind_cfg.get('rsi_divergence')}")
         
         df = fetch_and_prepare_data(selected_asset, period=selected_period, config=config)
         if df.empty:

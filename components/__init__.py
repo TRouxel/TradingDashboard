@@ -21,16 +21,15 @@ from .performance_charts import (
     create_accuracy_badges,
     create_performance_section,
     create_performance_summary_cards,
+    create_combination_ranking_table,
+    create_global_performance_summary,
     HORIZON_COLORS,
     HORIZON_NAMES
 )
-
-from .performance_charts import (
-    create_indicator_performance_chart,
-    create_accuracy_badges,
-    create_performance_section,
-    create_performance_summary_cards,
-    create_combination_ranking_table,  # NOUVEAU
-    HORIZON_COLORS,
-    HORIZON_NAMES
+from .strategy_charts import (
+    create_hold_and_sell_chart,
+    create_buy_on_divergence_chart,
+    create_strategy_stats_table,
+    create_strategies_section,
+    HOLDING_COLORS
 )

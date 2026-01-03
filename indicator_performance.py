@@ -2,7 +2,7 @@
 """
 Module d'analyse de la performance des indicateurs.
 Mesure la pertinence de chaque signal sur différents horizons temporels.
-VERSION CORRIGÉE - Signaux améliorés + Combinaisons fonctionnelles
+VERSION 3.0 - Scores basés sur les rendements réels en %
 """
 import pandas as pd
 import numpy as np
@@ -15,12 +15,11 @@ def calculate_performance_history(df, config=None, horizons=[1, 2, 5, 10, 20]):
     
     Pour chaque jour et chaque indicateur, on calcule:
     - Le signal émis (achat/vente/neutre)
-    - L'intensité du signal (contribution)
-    - Si le signal était correct pour chaque horizon
-    - Un score = intensité * (1 si correct, -1 si incorrect)
+    - Le rendement réel en % pour chaque horizon
+    - Un score = rendement * direction (positif si correct, négatif si incorrect)
     
     Returns:
-        dict: {indicateur: DataFrame avec colonnes [Date, signal, intensity, score_1d, score_2d, ...]}
+        dict: {indicateur: DataFrame avec colonnes [Date, signal, return_1d, return_2d, ...]}
     """
     if config is None:
         config = get_default_config()
@@ -34,9 +33,9 @@ def calculate_performance_history(df, config=None, horizons=[1, 2, 5, 10, 20]):
     # Normaliser les noms de colonnes (gérer close/Close)
     df = _normalize_column_names(df)
     
-    # Calculer les rendements futurs pour chaque horizon
+    # Calculer les rendements futurs pour chaque horizon (en %)
     for h in horizons:
-        df[f'future_return_{h}d'] = df['close'].shift(-h) / df['close'] - 1
+        df[f'future_return_{h}d'] = (df['close'].shift(-h) / df['close'] - 1) * 100
     
     # Dictionnaire pour stocker les résultats
     performance_history = {}
@@ -93,7 +92,7 @@ def _normalize_column_names(df):
 def _ensure_future_returns(df, horizons):
     """
     S'assure que les colonnes future_return_Xd existent dans le DataFrame.
-    Si elles n'existent pas, les calcule.
+    Si elles n'existent pas, les calcule en %.
     """
     df = df.copy()
     
@@ -101,64 +100,77 @@ def _ensure_future_returns(df, horizons):
     if 'close' not in df.columns and 'Close' in df.columns:
         df['close'] = df['Close']
     
-    # Calculer les rendements futurs manquants
+    # Calculer les rendements futurs manquants (en %)
     for h in horizons:
         col_name = f'future_return_{h}d'
         if col_name not in df.columns:
-            df[col_name] = df['close'].shift(-h) / df['close'] - 1
+            df[col_name] = (df['close'].shift(-h) / df['close'] - 1) * 100
     
     return df
 
 
-def _calculate_scores(df, signal_col, intensity_col, horizons):
+def _calculate_scores_v2(df, signal_col, horizons):
     """
-    Calcule les scores pour chaque horizon.
-    Score = intensité * direction_correcte
-    où direction_correcte = 1 si le prix va dans le sens prédit, -1 sinon
+    Calcule les scores basés sur les rendements réels en %.
+    
+    Score = rendement réel en %
+    - Positif si le signal était dans la bonne direction
+    - Négatif si le signal était dans la mauvaise direction
+    - 0 si signal neutre
     """
-    result = df[['Date', signal_col, intensity_col]].copy()
-    result.columns = ['Date', 'signal', 'intensity']
+    result = df[['Date', signal_col]].copy()
+    result.columns = ['Date', 'signal']
     
     for h in horizons:
         future_ret_col = f'future_return_{h}d'
         score_col = f'score_{h}d'
         correct_col = f'correct_{h}d'
+        return_col = f'return_{h}d'
         
         if future_ret_col not in df.columns:
             result[score_col] = np.nan
             result[correct_col] = np.nan
+            result[return_col] = np.nan
             continue
         
         scores = []
         corrects = []
+        returns = []
         
         for idx in range(len(df)):
             signal = df.iloc[idx][signal_col]
-            intensity = df.iloc[idx][intensity_col]
             future_ret = df.iloc[idx][future_ret_col]
             
-            if pd.isna(future_ret) or signal == 'neutral' or intensity == 0:
+            if pd.isna(future_ret) or signal == 'neutral':
                 scores.append(0)
                 corrects.append(np.nan)
+                returns.append(0)
                 continue
             
             # Déterminer si la prédiction était correcte
             if signal == 'buy':
+                # Pour un signal d'achat, on gagne si le prix monte
                 is_correct = future_ret > 0
+                # Le score est le rendement réel (positif si on a raison, négatif sinon)
+                score = future_ret
             elif signal == 'sell':
+                # Pour un signal de vente, on gagne si le prix baisse
                 is_correct = future_ret < 0
+                # Le score est l'inverse du rendement (on gagne quand ça baisse)
+                score = -future_ret
             else:
                 scores.append(0)
                 corrects.append(np.nan)
+                returns.append(0)
                 continue
             
-            # Score = intensité * direction
-            direction = 1 if is_correct else -1
-            scores.append(intensity * direction)
+            scores.append(score)
             corrects.append(1 if is_correct else 0)
+            returns.append(future_ret if signal == 'buy' else -future_ret)
         
         result[score_col] = scores
         result[correct_col] = corrects
+        result[return_col] = returns
     
     return result
 
@@ -205,11 +217,8 @@ def _safe_get_numeric(row, key, default=0):
 def analyze_rsi_daily(df, config, horizons):
     """Analyse quotidienne du RSI."""
     rsi_cfg = config.get('rsi', RSI)
-    weights = config.get('signal_weights', {})
-    base_weight = weights.get('rsi_exit_oversold', 2.0)
     
     signals = []
-    intensities = []
     
     oversold = rsi_cfg.get('oversold', 30)
     overbought = rsi_cfg.get('overbought', 70)
@@ -219,13 +228,11 @@ def analyze_rsi_daily(df, config, horizons):
         
         if idx == 0 or pd.isna(rsi):
             signals.append('neutral')
-            intensities.append(0)
             continue
         
         rsi_prev = df.iloc[idx - 1].get('rsi')
         if pd.isna(rsi_prev):
             signals.append('neutral')
-            intensities.append(0)
             continue
         
         stoch_k = df.iloc[idx].get('stochastic_k', 50)
@@ -240,58 +247,41 @@ def analyze_rsi_daily(df, config, horizons):
         if rsi_prev <= oversold and rsi > oversold:
             if stoch_k > stoch_d:
                 signals.append('buy')
-                intensities.append(base_weight * 1.2)
             else:
                 signals.append('buy')
-                intensities.append(base_weight * 0.7)
-        
         elif rsi_prev < 35 and rsi > rsi_prev + 3 and rsi < 50:
             if stoch_k > stoch_d:
                 signals.append('buy')
-                intensities.append(base_weight * 0.8)
             else:
                 signals.append('neutral')
-                intensities.append(0)
-        
         # Signal de vente : RSI sort de surachat
         elif rsi_prev >= overbought and rsi < overbought:
             if stoch_k < stoch_d:
                 signals.append('sell')
-                intensities.append(base_weight * 1.2)
             else:
                 signals.append('sell')
-                intensities.append(base_weight * 0.7)
-        
         elif rsi_prev > 65 and rsi < rsi_prev - 3 and rsi > 50:
             if stoch_k < stoch_d:
                 signals.append('sell')
-                intensities.append(base_weight * 0.8)
             else:
                 signals.append('neutral')
-                intensities.append(0)
-        
         else:
             signals.append('neutral')
-            intensities.append(0)
     
     df_temp = df.copy()
     df_temp['_signal'] = signals
-    df_temp['_intensity'] = intensities
     
-    return _calculate_scores(df_temp, '_signal', '_intensity', horizons)
+    return _calculate_scores_v2(df_temp, '_signal', horizons)
 
 
 def analyze_stochastic_daily(df, config, horizons):
     """Analyse quotidienne du Stochastique."""
     stoch_cfg = config.get('stochastic', STOCHASTIC)
-    weights = config.get('signal_weights', {})
-    base_weight = weights.get('stoch_bullish_cross', 1.0)
     
     oversold = stoch_cfg.get('oversold', 20)
     overbought = stoch_cfg.get('overbought', 80)
     
     signals = []
-    intensities = []
     
     for idx in range(len(df)):
         stoch_k = df.iloc[idx].get('stochastic_k')
@@ -299,7 +289,6 @@ def analyze_stochastic_daily(df, config, horizons):
         
         if pd.isna(stoch_k) or pd.isna(stoch_d) or idx == 0:
             signals.append('neutral')
-            intensities.append(0)
             continue
         
         stoch_k_prev = df.iloc[idx - 1].get('stochastic_k')
@@ -307,7 +296,6 @@ def analyze_stochastic_daily(df, config, horizons):
         
         if pd.isna(stoch_k_prev) or pd.isna(stoch_d_prev):
             signals.append('neutral')
-            intensities.append(0)
             continue
         
         bullish_cross = stoch_k_prev <= stoch_d_prev and stoch_k > stoch_d
@@ -315,32 +303,20 @@ def analyze_stochastic_daily(df, config, horizons):
         
         if bullish_cross and stoch_k < oversold + 15:
             signals.append('buy')
-            intensity = base_weight * (1 + (oversold + 15 - stoch_k) / 30)
-            intensities.append(min(intensity, base_weight * 1.5))
-        
         elif bearish_cross and stoch_k > overbought - 15:
             signals.append('sell')
-            intensity = base_weight * (1 + (stoch_k - (overbought - 15)) / 30)
-            intensities.append(min(intensity, base_weight * 1.5))
-        
         else:
             signals.append('neutral')
-            intensities.append(0)
     
     df_temp = df.copy()
     df_temp['_signal'] = signals
-    df_temp['_intensity'] = intensities
     
-    return _calculate_scores(df_temp, '_signal', '_intensity', horizons)
+    return _calculate_scores_v2(df_temp, '_signal', horizons)
 
 
 def analyze_bollinger_daily(df, config, horizons):
     """Analyse quotidienne des Bandes de Bollinger."""
-    weights = config.get('signal_weights', {})
-    base_weight = weights.get('bollinger_lower', 1.5)
-    
     signals = []
-    intensities = []
     
     for idx in range(len(df)):
         bb_signal = df.iloc[idx].get('bb_signal', 'neutral')
@@ -359,34 +335,24 @@ def analyze_bollinger_daily(df, config, horizons):
         
         if bb_signal == 'lower_touch' and price_rising:
             signals.append('buy')
-            intensities.append(base_weight)
         elif bb_signal == 'lower_zone' and price_rising:
             signals.append('buy')
-            intensities.append(base_weight * 0.5)
         elif bb_signal == 'upper_touch' and price_falling:
             signals.append('sell')
-            intensities.append(base_weight)
         elif bb_signal == 'upper_zone' and price_falling:
             signals.append('sell')
-            intensities.append(base_weight * 0.5)
         else:
             signals.append('neutral')
-            intensities.append(0)
     
     df_temp = df.copy()
     df_temp['_signal'] = signals
-    df_temp['_intensity'] = intensities
     
-    return _calculate_scores(df_temp, '_signal', '_intensity', horizons)
+    return _calculate_scores_v2(df_temp, '_signal', horizons)
 
 
 def analyze_macd_daily(df, config, horizons):
     """Analyse quotidienne du MACD."""
-    weights = config.get('signal_weights', {})
-    base_weight = weights.get('macd_bullish', 1.0)
-    
     signals = []
-    intensities = []
     
     for idx in range(len(df)):
         macd = df.iloc[idx].get('macd')
@@ -395,7 +361,6 @@ def analyze_macd_daily(df, config, horizons):
         
         if pd.isna(macd) or pd.isna(macd_signal) or idx < 2:
             signals.append('neutral')
-            intensities.append(0)
             continue
         
         macd_prev = df.iloc[idx - 1].get('macd')
@@ -404,61 +369,34 @@ def analyze_macd_daily(df, config, horizons):
         
         if pd.isna(macd_prev) or pd.isna(macd_signal_prev):
             signals.append('neutral')
-            intensities.append(0)
             continue
         
         bullish_cross = macd_prev <= macd_signal_prev and macd > macd_signal
         bearish_cross = macd_prev >= macd_signal_prev and macd < macd_signal
         
-        hist_increasing = macd_hist_prev is not None and not pd.isna(macd_hist_prev) and not pd.isna(macd_hist) and macd_hist > macd_hist_prev
-        hist_decreasing = macd_hist_prev is not None and not pd.isna(macd_hist_prev) and not pd.isna(macd_hist) and macd_hist < macd_hist_prev
-        
         if bullish_cross:
-            intensity = base_weight
-            if macd > 0:
-                intensity *= 1.3
-            if hist_increasing:
-                intensity *= 1.2
             signals.append('buy')
-            intensities.append(min(intensity, base_weight * 2))
-        
         elif bearish_cross:
-            intensity = base_weight
-            if macd < 0:
-                intensity *= 1.3
-            if hist_decreasing:
-                intensity *= 1.2
             signals.append('sell')
-            intensities.append(min(intensity, base_weight * 2))
-        
         elif macd_hist_prev is not None and not pd.isna(macd_hist_prev) and not pd.isna(macd_hist):
-            if macd_hist_prev <= 0 and macd_hist > 0 and hist_increasing:
+            if macd_hist_prev <= 0 and macd_hist > 0:
                 signals.append('buy')
-                intensities.append(base_weight * 0.5)
-            elif macd_hist_prev >= 0 and macd_hist < 0 and hist_decreasing:
+            elif macd_hist_prev >= 0 and macd_hist < 0:
                 signals.append('sell')
-                intensities.append(base_weight * 0.5)
             else:
                 signals.append('neutral')
-                intensities.append(0)
         else:
             signals.append('neutral')
-            intensities.append(0)
     
     df_temp = df.copy()
     df_temp['_signal'] = signals
-    df_temp['_intensity'] = intensities
     
-    return _calculate_scores(df_temp, '_signal', '_intensity', horizons)
+    return _calculate_scores_v2(df_temp, '_signal', horizons)
 
 
 def analyze_trend_daily(df, config, horizons):
     """Analyse quotidienne de la Tendance."""
-    weights = config.get('signal_weights', {})
-    base_weight = weights.get('trend_bonus', 1.0)
-    
     signals = []
-    intensities = []
     
     for idx in range(len(df)):
         trend = df.iloc[idx].get('trend', 'neutral')
@@ -468,19 +406,15 @@ def analyze_trend_daily(df, config, horizons):
         
         if trend in ['strong_bullish', 'bullish']:
             signals.append('buy')
-            intensities.append(base_weight if trend == 'strong_bullish' else base_weight * 0.7)
         elif trend in ['strong_bearish', 'bearish']:
             signals.append('sell')
-            intensities.append(base_weight if trend == 'strong_bearish' else base_weight * 0.7)
         else:
             signals.append('neutral')
-            intensities.append(0)
     
     df_temp = df.copy()
     df_temp['_signal'] = signals
-    df_temp['_intensity'] = intensities
     
-    return _calculate_scores(df_temp, '_signal', '_intensity', horizons)
+    return _calculate_scores_v2(df_temp, '_signal', horizons)
 
 
 def analyze_adx_daily(df, config, horizons):
@@ -488,7 +422,6 @@ def analyze_adx_daily(df, config, horizons):
     adx_cfg = config.get('adx', ADX)
     
     signals = []
-    intensities = []
     
     for idx in range(len(df)):
         adx = df.iloc[idx].get('adx')
@@ -497,36 +430,25 @@ def analyze_adx_daily(df, config, horizons):
         
         if pd.isna(adx) or pd.isna(di_plus) or pd.isna(di_minus):
             signals.append('neutral')
-            intensities.append(0)
             continue
         
         if adx > adx_cfg.get('weak', 20):
-            intensity = 0.5 + (adx - 20) / 40
-            intensity = min(intensity, 1.5)
-            
             if di_plus > di_minus:
                 signals.append('buy')
             else:
                 signals.append('sell')
-            intensities.append(intensity)
         else:
             signals.append('neutral')
-            intensities.append(0)
     
     df_temp = df.copy()
     df_temp['_signal'] = signals
-    df_temp['_intensity'] = intensities
     
-    return _calculate_scores(df_temp, '_signal', '_intensity', horizons)
+    return _calculate_scores_v2(df_temp, '_signal', horizons)
 
 
 def analyze_pattern_daily(df, config, horizons):
     """Analyse quotidienne des Patterns."""
-    weights = config.get('signal_weights', {})
-    base_weight = weights.get('pattern_bullish', 1.5)
-    
     signals = []
-    intensities = []
     
     for idx in range(len(df)):
         pattern_dir = df.iloc[idx].get('pattern_direction', 'neutral')
@@ -536,28 +458,20 @@ def analyze_pattern_daily(df, config, horizons):
         
         if pattern_dir == 'bullish':
             signals.append('buy')
-            intensities.append(base_weight)
         elif pattern_dir == 'bearish':
             signals.append('sell')
-            intensities.append(base_weight)
         else:
             signals.append('neutral')
-            intensities.append(0)
     
     df_temp = df.copy()
     df_temp['_signal'] = signals
-    df_temp['_intensity'] = intensities
     
-    return _calculate_scores(df_temp, '_signal', '_intensity', horizons)
+    return _calculate_scores_v2(df_temp, '_signal', horizons)
 
 
 def analyze_divergence_daily(df, config, horizons):
     """Analyse quotidienne des Divergences RSI."""
-    weights = config.get('signal_weights', {})
-    base_weight = weights.get('rsi_divergence', 2.0)
-    
     signals = []
-    intensities = []
     
     for idx in range(len(df)):
         rsi_div = df.iloc[idx].get('rsi_divergence', 'none')
@@ -567,78 +481,95 @@ def analyze_divergence_daily(df, config, horizons):
         
         if rsi_div == 'bullish':
             signals.append('buy')
-            intensities.append(base_weight)
         elif rsi_div == 'bearish':
             signals.append('sell')
-            intensities.append(base_weight)
         else:
             signals.append('neutral')
-            intensities.append(0)
     
     df_temp = df.copy()
     df_temp['_signal'] = signals
-    df_temp['_intensity'] = intensities
     
-    return _calculate_scores(df_temp, '_signal', '_intensity', horizons)
+    return _calculate_scores_v2(df_temp, '_signal', horizons)
 
 
 def analyze_recommendation_daily(df, config, horizons):
     """Analyse quotidienne de la Recommandation globale."""
     signals = []
-    intensities = []
     
     for idx in range(len(df)):
         reco = df.iloc[idx].get('recommendation', 'Neutre')
-        conviction = df.iloc[idx].get('conviction', 0)
         
         if pd.isna(reco) or reco is None:
             reco = 'Neutre'
-        if pd.isna(conviction) or conviction is None:
-            conviction = 0
         
         if reco == 'Acheter':
             signals.append('buy')
-            intensities.append(conviction)
         elif reco == 'Vendre':
             signals.append('sell')
-            intensities.append(conviction)
         else:
             signals.append('neutral')
-            intensities.append(0)
     
     df_temp = df.copy()
     df_temp['_signal'] = signals
-    df_temp['_intensity'] = intensities
     
-    return _calculate_scores(df_temp, '_signal', '_intensity', horizons)
+    return _calculate_scores_v2(df_temp, '_signal', horizons)
 
 
 def calculate_accuracy_stats(perf_df, horizons=[1, 2, 5, 10, 20]):
     """
-    Calcule les statistiques de précision pour un indicateur.
+    Calcule les statistiques de précision et de performance cumulée pour un indicateur.
     """
     stats = {}
     
     for h in horizons:
         correct_col = f'correct_{h}d'
+        return_col = f'return_{h}d'
+        score_col = f'score_{h}d'
+        
         if correct_col not in perf_df.columns:
             continue
         
         valid = perf_df[perf_df[correct_col].notna()]
         
         if len(valid) == 0:
-            stats[h] = {'accuracy': None, 'total_signals': 0, 'correct': 0, 'wrong': 0}
+            stats[h] = {
+                'accuracy': None, 
+                'total_signals': 0, 
+                'correct': 0, 
+                'wrong': 0,
+                'cumulative_return': 0,
+                'avg_return': 0,
+                'best_trade': 0,
+                'worst_trade': 0,
+            }
             continue
         
         correct = (valid[correct_col] == 1).sum()
         wrong = (valid[correct_col] == 0).sum()
         total = correct + wrong
         
+        # Calcul de la performance cumulée
+        if return_col in perf_df.columns:
+            returns = perf_df[perf_df[return_col].notna() & (perf_df['signal'] != 'neutral')][return_col]
+            cumulative_return = returns.sum() if len(returns) > 0 else 0
+            avg_return = returns.mean() if len(returns) > 0 else 0
+            best_trade = returns.max() if len(returns) > 0 else 0
+            worst_trade = returns.min() if len(returns) > 0 else 0
+        else:
+            cumulative_return = 0
+            avg_return = 0
+            best_trade = 0
+            worst_trade = 0
+        
         stats[h] = {
             'accuracy': (correct / total * 100) if total > 0 else None,
             'total_signals': total,
             'correct': correct,
-            'wrong': wrong
+            'wrong': wrong,
+            'cumulative_return': cumulative_return,
+            'avg_return': avg_return,
+            'best_trade': best_trade,
+            'worst_trade': worst_trade,
         }
     
     return stats
@@ -651,7 +582,6 @@ def _check_rsi_oversold_stoch_bullish(row, row_prev, cfg):
     rsi = _safe_get_numeric(row, 'rsi', 50)
     stoch_k = _safe_get_numeric(row, 'stochastic_k', 50)
     stoch_d = _safe_get_numeric(row, 'stochastic_d', 50)
-    # Assouplir: RSI < 45 ET stoch haussier
     return rsi < 45 and stoch_k > stoch_d
 
 
@@ -662,7 +592,6 @@ def _check_rsi_exit_oversold_stoch(row, row_prev, cfg):
     stoch_k = _safe_get_numeric(row, 'stochastic_k', 50)
     stoch_d = _safe_get_numeric(row, 'stochastic_d', 50)
     oversold = cfg.get('rsi', {}).get('oversold', 30)
-    # RSI était en survente et remonte, avec stoch haussier
     return rsi_prev <= oversold and rsi > oversold and stoch_k > stoch_d
 
 
@@ -682,7 +611,6 @@ def _check_macd_cross_rsi_low(row, row_prev, cfg):
     macd_prev = _safe_get_numeric(row_prev, 'macd', 0) if row_prev else 0
     macd_signal_prev = _safe_get_numeric(row_prev, 'macd_signal', 0) if row_prev else 0
     rsi = _safe_get_numeric(row, 'rsi', 50)
-    # Croisement haussier du MACD + RSI < 50
     bullish_cross = macd_prev <= macd_signal_prev and macd > macd_signal
     return bullish_cross and rsi < 50
 
@@ -765,7 +693,6 @@ def _check_rsi_overbought_stoch_bearish(row, row_prev, cfg):
     rsi = _safe_get_numeric(row, 'rsi', 50)
     stoch_k = _safe_get_numeric(row, 'stochastic_k', 50)
     stoch_d = _safe_get_numeric(row, 'stochastic_d', 50)
-    # Assouplir: RSI > 55 ET stoch baissier
     return rsi > 55 and stoch_k < stoch_d
 
 
@@ -776,7 +703,6 @@ def _check_rsi_exit_overbought_stoch(row, row_prev, cfg):
     stoch_k = _safe_get_numeric(row, 'stochastic_k', 50)
     stoch_d = _safe_get_numeric(row, 'stochastic_d', 50)
     overbought = cfg.get('rsi', {}).get('overbought', 70)
-    # RSI était en surachat et descend, avec stoch baissier
     return rsi_prev >= overbought and rsi < overbought and stoch_k < stoch_d
 
 
@@ -796,7 +722,6 @@ def _check_macd_cross_bearish_rsi_high(row, row_prev, cfg):
     macd_prev = _safe_get_numeric(row_prev, 'macd', 0) if row_prev else 0
     macd_signal_prev = _safe_get_numeric(row_prev, 'macd_signal', 0) if row_prev else 0
     rsi = _safe_get_numeric(row, 'rsi', 50)
-    # Croisement baissier du MACD + RSI > 50
     bearish_cross = macd_prev >= macd_signal_prev and macd < macd_signal
     return bearish_cross and rsi > 50
 
@@ -926,13 +851,10 @@ def analyze_signal_combinations(df, config, horizons):
     """
     Analyse les combinaisons de signaux.
     Retourne un dictionnaire avec les performances de chaque combinaison.
-    
-    CORRECTION: Calcule les future_returns avant d'analyser les combinaisons.
     """
     if config is None:
         config = get_default_config()
     
-    # S'assurer que la config a les clés nécessaires
     if 'rsi' not in config:
         config['rsi'] = RSI
     if 'stochastic' not in config:
@@ -940,7 +862,6 @@ def analyze_signal_combinations(df, config, horizons):
     if 'adx' not in config:
         config['adx'] = ADX
     
-    # CORRECTION: S'assurer que les future_returns existent
     df = _ensure_future_returns(df, horizons)
     
     results = {}
@@ -950,10 +871,9 @@ def analyze_signal_combinations(df, config, horizons):
         combo_type = combo_def['type']
         check_func = combo_def['check']
         
-        result_df = _analyze_single_combination_v2(df, combo_name, combo_type, check_func, config, horizons)
+        result_df = _analyze_single_combination_v3(df, combo_name, combo_type, check_func, config, horizons)
         
         if result_df is not None and not result_df.empty:
-            # Compter les signaux non-neutres
             signal_count = len(result_df[result_df['signal'] != 'neutral'])
             if signal_count > 0:
                 results[combo_name] = {
@@ -965,18 +885,16 @@ def analyze_signal_combinations(df, config, horizons):
     return results
 
 
-def _analyze_single_combination_v2(df, combo_name, combo_type, check_func, config, horizons):
+def _analyze_single_combination_v3(df, combo_name, combo_type, check_func, config, horizons):
     """
-    Analyse une combinaison spécifique.
+    Analyse une combinaison spécifique avec les rendements réels.
     """
     signals = []
-    intensities = []
     
     for idx in range(len(df)):
         row = df.iloc[idx]
         row_dict = row.to_dict()
         
-        # Récupérer la ligne précédente pour les croisements
         if idx > 0:
             row_prev_dict = df.iloc[idx - 1].to_dict()
         else:
@@ -985,19 +903,15 @@ def _analyze_single_combination_v2(df, combo_name, combo_type, check_func, confi
         try:
             if check_func(row_dict, row_prev_dict, config):
                 signals.append(combo_type)
-                intensities.append(1.5)
             else:
                 signals.append('neutral')
-                intensities.append(0)
         except Exception as e:
             signals.append('neutral')
-            intensities.append(0)
     
     df_temp = df.copy()
     df_temp['_signal'] = signals
-    df_temp['_intensity'] = intensities
     
-    return _calculate_scores(df_temp, '_signal', '_intensity', horizons)
+    return _calculate_scores_v2(df_temp, '_signal', horizons)
 
 
 def calculate_performance_history_with_combinations(df, config=None, horizons=[1, 2, 5, 10, 20]):
@@ -1007,26 +921,17 @@ def calculate_performance_history_with_combinations(df, config=None, horizons=[1
     if config is None:
         config = get_default_config()
     
-    # Normaliser les colonnes
     df = _normalize_column_names(df)
-    
-    # S'assurer que les future_returns existent pour tout le monde
     df = _ensure_future_returns(df, horizons)
     
-    # D'abord, calculer les performances des indicateurs individuels
     individual_perf = calculate_performance_history(df, config, horizons)
-    
-    # Ensuite, calculer les performances des combinaisons
     combination_results = analyze_signal_combinations(df, config, horizons)
     
-    # Fusionner les résultats
     all_perf = {}
     
-    # Ajouter les indicateurs individuels avec préfixe
     for name, perf_df in individual_perf.items():
         all_perf[f"📊 {name}"] = perf_df
     
-    # Ajouter les combinaisons avec leur type (emoji vert/rouge)
     for combo_name, combo_data in combination_results.items():
         perf_df = combo_data['df']
         combo_type = combo_data['type']
@@ -1042,25 +947,29 @@ def calculate_performance_history_with_combinations(df, config=None, horizons=[1
 def get_combination_summary(combination_perf, horizons=[1, 2, 5, 10, 20]):
     """
     Crée un résumé trié des combinaisons par performance.
+    Inclut maintenant la performance cumulée.
     """
     summary = []
     
     for combo_name, perf_df in combination_perf.items():
         stats = calculate_accuracy_stats(perf_df, horizons)
         
-        # Calculer la moyenne des précisions sur tous les horizons
         valid_accuracies = [s['accuracy'] for h, s in stats.items() 
                           if s.get('accuracy') is not None]
         avg_accuracy = np.mean(valid_accuracies) if valid_accuracies else None
         
-        # Total des signaux
         total_signals = sum(s.get('total_signals', 0) for s in stats.values())
+        
+        # Calculer la performance cumulée totale
+        total_cumulative = sum(s.get('cumulative_return', 0) for s in stats.values())
+        avg_cumulative = total_cumulative / len(horizons) if horizons else 0
         
         if avg_accuracy is not None and total_signals > 0:
             summary.append({
                 'name': combo_name,
                 'accuracy': avg_accuracy,
                 'total_signals': total_signals,
+                'cumulative_return': avg_cumulative,
                 'stats': stats
             })
     

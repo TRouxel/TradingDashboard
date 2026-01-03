@@ -236,6 +236,66 @@ def create_main_layout():
             ),
         ], className="mb-3", color="dark", outline=True),
 
+        # === 4. SIMULATIONS DE TRADING (COLLAPSIBLE) ===
+        dbc.Card([
+            dbc.CardHeader([
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Button(
+                            id="collapse-strategy-btn",
+                            color="link",
+                            className="text-white text-decoration-none p-0",
+                            children=[
+                                html.H5("🎯 Simulations de Trading", className="mb-0 d-inline me-2"),
+                            ]
+                        ),
+                    ], width="auto"),
+                    dbc.Col([
+                        dbc.Button("🚀 Simuler", id="analyze-strategy-btn", color="success", size="sm", className="me-3"),
+                        html.Span([
+                            html.Small("Stratégies basées sur la ", className="text-muted"),
+                            html.Small("divergence RSI", className="text-info fw-bold"),
+                        ]),
+                    ], className="d-flex align-items-center"),
+                ], align="center", className="g-0"),
+            ]),
+            dbc.Collapse(
+                dbc.CardBody([
+                    dcc.Loading(
+                        html.Div(id='strategy-content', children=[
+                            html.P([
+                                "Cliquez sur ",
+                                html.Strong("'Simuler'"),
+                                " pour exécuter deux stratégies de trading basées sur la divergence RSI:",
+                            ], className="text-muted mb-2"),
+                            html.Ul([
+                                html.Li([
+                                    html.Strong("Hold & Sell: "),
+                                    "Achat initial, vente sur divergence baissière, rachat après N jours. ",
+                                    html.Em("Pour actifs long terme (ETF, blue chips).")
+                                ], className="text-muted small"),
+                                html.Li([
+                                    html.Strong("Buy on Divergence: "),
+                                    "Achat uniquement sur divergence haussière, vente après N jours. ",
+                                    html.Em("Pour actifs plus spéculatifs.")
+                                ], className="text-muted small"),
+                            ]),
+                            html.P([
+                                "Le ",
+                                html.Strong("spread"),
+                                " (coût de transaction) utilise la valeur '",
+                                html.Em("Écart Min Achat/Vente"),
+                                "' des seuils de décision."
+                            ], className="text-muted small"),
+                        ]),
+                        type="circle"
+                    )
+                ], className="p-2"),
+                id="collapse-strategy",
+                is_open=False,
+            ),
+        ], className="mb-3", color="dark", outline=True),
+
         # === 4. GRAPHIQUES PRINCIPAUX ===
         html.Div(id='main-charts-container'),
 

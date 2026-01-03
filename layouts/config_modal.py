@@ -1,21 +1,51 @@
 # layouts/config_modal.py
 """
 Modal de configuration des paramètres.
+VERSION 2.2 - CORRECTION des limites min pour permettre 0 et valeurs décimales basses
 """
 from dash import dcc, html
 import dash_bootstrap_components as dbc
 
-from config import SIGNAL_TIMEFRAME, get_default_config
+from config import SIGNAL_TIMEFRAME, TRADING_PROFILES, get_default_config
 
 
 def create_config_modal():
     """Crée le modal de configuration des paramètres."""
     default_config = get_default_config()
+    comb_weights = default_config.get('combination_weights', {})
+    
+    # Créer les options pour le sélecteur de profil
+    profile_options = [
+        {'label': f"{profile['name']} - {profile['description']}", 'value': key}
+        for key, profile in TRADING_PROFILES.items()
+    ]
     
     return dbc.Modal([
         dbc.ModalHeader(dbc.ModalTitle("⚙️ Configuration des Paramètres"), close_button=True),
         dbc.ModalBody([
             dbc.Accordion([
+                # === PROFIL DE TRADING ===
+                dbc.AccordionItem([
+                    html.P("Sélectionnez un profil prédéfini qui ajuste automatiquement tous les paramètres.", className="text-muted mb-3"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Profil de Trading :"),
+                            dcc.Dropdown(
+                                id='config-trading-profile',
+                                options=profile_options,
+                                value='balanced',
+                                clearable=False
+                            ),
+                        ], width=12),
+                    ]),
+                    html.Hr(),
+                    html.Div(id='profile-description', className="mt-2"),
+                    html.Div([
+                        html.H6("Caractéristiques du profil sélectionné :", className="mt-3"),
+                        html.Div(id='profile-details', className="small text-muted")
+                    ]),
+                ], title="🎯 Profil de Trading", className="bg-primary"),
+                
                 # === GESTION DES ACTIFS ===
                 dbc.AccordionItem([
                     html.P("Ajoutez ou supprimez des actifs à suivre (symboles Yahoo Finance).", className="text-muted mb-3"),
@@ -54,6 +84,235 @@ def create_config_modal():
                         ], width=6),
                     ]),
                 ], title="📅 Échelle de Temps"),
+                
+                # === TOUTES LES COMBINAISONS D'ACHAT ===
+                dbc.AccordionItem([
+                    html.P([
+                        "Les combinaisons d'indicateurs sont plus fiables que les indicateurs seuls. ",
+                        html.Strong("Mettez à 0 pour désactiver une combinaison.")
+                    ], className="text-muted mb-3"),
+                    
+                    # Ligne 1 - Très haute fiabilité
+                    html.H6("🏆 Très Haute Fiabilité", className="text-success mt-2"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Divergence Haussière + Stoch :", className="small"),
+                            dbc.Input(id='config-comb-divergence-bullish-stoch', type='number', 
+                                     value=comb_weights.get('divergence_bullish_stoch', 3.0), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("Triple Confirm Achat :", className="small"),
+                            dbc.Input(id='config-comb-triple-confirm-buy', type='number', 
+                                     value=comb_weights.get('triple_confirm_buy', 2.8), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("MACD Cross + RSI Bas :", className="small"),
+                            dbc.Input(id='config-comb-macd-cross-rsi-low', type='number', 
+                                     value=comb_weights.get('macd_cross_rsi_low', 2.5), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                    ], className="mb-2"),
+                    
+                    # Ligne 2 - Haute fiabilité
+                    html.H6("⭐ Haute Fiabilité", className="text-primary mt-3"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Bollinger Basse + RSI Bas :", className="small"),
+                            dbc.Input(id='config-comb-bollinger-low-rsi-low', type='number', 
+                                     value=comb_weights.get('bollinger_low_rsi_low', 2.3), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("RSI Bas + Stoch Haussier :", className="small"),
+                            dbc.Input(id='config-comb-rsi-low-stoch-bullish', type='number', 
+                                     value=comb_weights.get('rsi_low_stoch_bullish', 2.2), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("Pattern Haussier + RSI Bas :", className="small"),
+                            dbc.Input(id='config-comb-pattern-bullish-rsi-low', type='number', 
+                                     value=comb_weights.get('pattern_bullish_rsi_low', 2.2), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("Bollinger Basse + Stoch :", className="small"),
+                            dbc.Input(id='config-comb-bollinger-low-stoch-bullish', type='number', 
+                                     value=comb_weights.get('bollinger_low_stoch_bullish', 2.0), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                    ], className="mb-2"),
+                    
+                    # Ligne 3 - Fiabilité moyenne
+                    html.H6("📊 Fiabilité Moyenne", className="text-warning mt-3"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("ADX Fort + DI+ :", className="small"),
+                            dbc.Input(id='config-comb-adx-strong-di-plus', type='number', 
+                                     value=comb_weights.get('adx_strong_di_plus', 1.8), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("MACD Haussier + Trend :", className="small"),
+                            dbc.Input(id='config-comb-macd-bullish-trend-bullish', type='number', 
+                                     value=comb_weights.get('macd_bullish_trend_bullish', 1.8), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("MACD Positif + Trend :", className="small"),
+                            dbc.Input(id='config-comb-macd-positive-trend-bullish', type='number', 
+                                     value=comb_weights.get('macd_positive_trend_bullish', 1.7), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("Pattern + Trend Haussier :", className="small"),
+                            dbc.Input(id='config-comb-pattern-bullish-trend-bullish', type='number', 
+                                     value=comb_weights.get('pattern_bullish_trend_bullish', 1.6), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                    ], className="mb-2"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Stoch Cross + RSI Bas :", className="small"),
+                            dbc.Input(id='config-comb-stoch-cross-bullish-rsi-low', type='number', 
+                                     value=comb_weights.get('stoch_cross_bullish_rsi_low', 1.6), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("RSI Sortie Survente + Stoch :", className="small"),
+                            dbc.Input(id='config-comb-rsi-exit-oversold-stoch', type='number', 
+                                     value=comb_weights.get('rsi_exit_oversold_stoch', 1.5), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                    ], className="mb-2"),
+                ], title="🟢 Combinaisons d'ACHAT (13)"),
+                
+                # === TOUTES LES COMBINAISONS DE VENTE ===
+                dbc.AccordionItem([
+                    html.P([
+                        "Les combinaisons de vente fonctionnent de manière symétrique aux combinaisons d'achat. ",
+                        html.Strong("Mettez à 0 pour désactiver une combinaison.")
+                    ], className="text-muted mb-3"),
+                    
+                    # Ligne 1 - Très haute fiabilité
+                    html.H6("🏆 Très Haute Fiabilité", className="text-danger mt-2"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Divergence Baissière + Stoch :", className="small"),
+                            dbc.Input(id='config-comb-divergence-bearish-stoch', type='number', 
+                                     value=comb_weights.get('divergence_bearish_stoch', 3.0), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("Triple Confirm Vente :", className="small"),
+                            dbc.Input(id='config-comb-triple-confirm-sell', type='number', 
+                                     value=comb_weights.get('triple_confirm_sell', 2.8), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("MACD Cross Baissier + RSI :", className="small"),
+                            dbc.Input(id='config-comb-macd-cross-bearish-rsi-high', type='number', 
+                                     value=comb_weights.get('macd_cross_bearish_rsi_high', 2.5), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                    ], className="mb-2"),
+                    
+                    # Ligne 2 - Haute fiabilité
+                    html.H6("⭐ Haute Fiabilité", className="text-warning mt-3"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Bollinger Haute + RSI Haut :", className="small"),
+                            dbc.Input(id='config-comb-bollinger-high-rsi-high', type='number', 
+                                     value=comb_weights.get('bollinger_high_rsi_high', 2.3), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("RSI Haut + Stoch Baissier :", className="small"),
+                            dbc.Input(id='config-comb-rsi-high-stoch-bearish', type='number', 
+                                     value=comb_weights.get('rsi_high_stoch_bearish', 2.2), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("Pattern Baissier + RSI Haut :", className="small"),
+                            dbc.Input(id='config-comb-pattern-bearish-rsi-high', type='number', 
+                                     value=comb_weights.get('pattern_bearish_rsi_high', 2.2), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("Bollinger Haute + Stoch :", className="small"),
+                            dbc.Input(id='config-comb-bollinger-high-stoch-bearish', type='number', 
+                                     value=comb_weights.get('bollinger_high_stoch_bearish', 2.0), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                    ], className="mb-2"),
+                    
+                    # Ligne 3 - Fiabilité moyenne
+                    html.H6("📊 Fiabilité Moyenne", className="text-secondary mt-3"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("ADX Fort + DI- :", className="small"),
+                            dbc.Input(id='config-comb-adx-strong-di-minus', type='number', 
+                                     value=comb_weights.get('adx_strong_di_minus', 1.8), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("MACD Baissier + Trend :", className="small"),
+                            dbc.Input(id='config-comb-macd-bearish-trend-bearish', type='number', 
+                                     value=comb_weights.get('macd_bearish_trend_bearish', 1.8), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("MACD Négatif + Trend :", className="small"),
+                            dbc.Input(id='config-comb-macd-negative-trend-bearish', type='number', 
+                                     value=comb_weights.get('macd_negative_trend_bearish', 1.7), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("Pattern + Trend Baissier :", className="small"),
+                            dbc.Input(id='config-comb-pattern-bearish-trend-bearish', type='number', 
+                                     value=comb_weights.get('pattern_bearish_trend_bearish', 1.6), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                    ], className="mb-2"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Stoch Cross Baissier + RSI :", className="small"),
+                            dbc.Input(id='config-comb-stoch-cross-bearish-rsi-high', type='number', 
+                                     value=comb_weights.get('stoch_cross_bearish_rsi_high', 1.6), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("RSI Sortie Surachat + Stoch :", className="small"),
+                            dbc.Input(id='config-comb-rsi-exit-overbought-stoch', type='number', 
+                                     value=comb_weights.get('rsi_exit_overbought_stoch', 1.5), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("Prix Sous MAs + MACD Neg :", className="small"),
+                            dbc.Input(id='config-comb-price-below-mas-macd-negative', type='number', 
+                                     value=comb_weights.get('price_below_mas_macd_negative', 1.5), min=0, max=5, step=0.1, size="sm"),
+                        ], width=3),
+                    ], className="mb-2"),
+                ], title="🔴 Combinaisons de VENTE (13)"),
+                
+                # === INDICATEURS INDIVIDUELS ===
+                dbc.AccordionItem([
+                    html.P([
+                        "Les indicateurs individuels ont un poids réduit car ils sont moins fiables seuls. ",
+                        "La Divergence RSI et la Tendance sont les plus fiables."
+                    ], className="text-muted mb-3"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Divergence RSI :"),
+                            dbc.Input(id='config-ind-divergence', type='number', value=2.0, min=0, max=5, step=0.1),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("Tendance Forte :"),
+                            dbc.Input(id='config-ind-trend-strong', type='number', value=1.5, min=0, max=5, step=0.1),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("Tendance Faible :"),
+                            dbc.Input(id='config-ind-trend-weak', type='number', value=0.8, min=0, max=5, step=0.1),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("Pattern :"),
+                            dbc.Input(id='config-ind-pattern', type='number', value=0.8, min=0, max=5, step=0.1),
+                        ], width=3),
+                    ], className="mb-2"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("RSI Extrême :"),
+                            dbc.Input(id='config-ind-rsi-extreme', type='number', value=0.8, min=0, max=5, step=0.1),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("Stoch Cross :"),
+                            dbc.Input(id='config-ind-stoch', type='number', value=0.5, min=0, max=5, step=0.1),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("MACD Cross :"),
+                            dbc.Input(id='config-ind-macd', type='number', value=0.6, min=0, max=5, step=0.1),
+                        ], width=3),
+                        dbc.Col([
+                            html.Label("Bollinger :"),
+                            dbc.Input(id='config-ind-bollinger', type='number', value=0.5, min=0, max=5, step=0.1),
+                        ], width=3),
+                    ]),
+                ], title="📊 Poids Indicateurs Individuels"),
                 
                 # === RSI ===
                 dbc.AccordionItem([
@@ -125,10 +384,6 @@ def create_config_modal():
                             html.Label("Écart-type :"),
                             dbc.Input(id='config-bb-std', type='number', value=default_config['bollinger']['std_dev'], min=1, max=4, step=0.5),
                         ], width=4),
-                        dbc.Col([
-                            html.Label("Poids signal :"),
-                            dbc.Input(id='config-weight-bollinger', type='number', value=default_config['signal_weights']['bollinger_lower'], min=0, max=5, step=0.5),
-                        ], width=4),
                     ]),
                 ], title="📊 Bandes de Bollinger"),
                 
@@ -186,67 +441,50 @@ def create_config_modal():
                     ]),
                 ], title="💪 ADX (Force de Tendance)"),
                 
-                # === PONDÉRATIONS DES SIGNAUX ===
-                dbc.AccordionItem([
-                    html.P("Ajustez le poids de chaque signal dans le calcul de la conviction.", className="text-muted mb-3"),
-                    dbc.Row([
-                        dbc.Col([
-                            html.Label("RSI sortie zone :"),
-                            dbc.Input(id='config-weight-rsi', type='number', value=default_config['signal_weights']['rsi_exit_oversold'], min=0, max=5, step=0.5),
-                        ], width=3),
-                        dbc.Col([
-                            html.Label("Croisement Stoch :"),
-                            dbc.Input(id='config-weight-stoch', type='number', value=default_config['signal_weights']['stoch_bullish_cross'], min=0, max=5, step=0.5),
-                        ], width=3),
-                        dbc.Col([
-                            html.Label("MACD :"),
-                            dbc.Input(id='config-weight-macd', type='number', value=default_config['signal_weights']['macd_bullish'], min=0, max=5, step=0.5),
-                        ], width=3),
-                        dbc.Col([
-                            html.Label("Histogramme MACD :"),
-                            dbc.Input(id='config-weight-macd-hist', type='number', value=default_config['signal_weights']['macd_histogram_positive'], min=0, max=5, step=0.5),
-                        ], width=3),
-                    ], className="mb-2"),
-                    dbc.Row([
-                        dbc.Col([
-                            html.Label("Divergence RSI :"),
-                            dbc.Input(id='config-weight-divergence', type='number', value=default_config['signal_weights']['rsi_divergence'], min=0, max=5, step=0.5),
-                        ], width=3),
-                        dbc.Col([
-                            html.Label("Pattern Chandelier :"),
-                            dbc.Input(id='config-weight-pattern', type='number', value=default_config['signal_weights']['pattern_bullish'], min=0, max=5, step=0.5),
-                        ], width=3),
-                        dbc.Col([
-                            html.Label("Bonus Tendance :"),
-                            dbc.Input(id='config-weight-trend', type='number', value=default_config['signal_weights']['trend_bonus'], min=0, max=5, step=0.5),
-                        ], width=3),
-                    ]),
-                ], title="⚖️ Pondérations des Signaux"),
-                
-                # === SEUILS DE DÉCISION ===
+                # === SEUILS DE DÉCISION - CORRIGÉ ===
                 dbc.AccordionItem([
                     dbc.Row([
                         dbc.Col([
                             html.Label("Seuil Conviction Minimum :"),
-                            dbc.Input(id='config-decision-threshold', type='number', value=default_config['decision']['min_conviction_threshold'], min=1, max=5, step=0.5),
+                            # CORRECTION: min=0 au lieu de min=1, step=0.1 pour les décimales
+                            dbc.Input(id='config-decision-threshold', type='number', 
+                                     value=default_config['decision']['min_conviction_threshold'], 
+                                     min=0, max=10, step=0.1),
                         ], width=4),
                         dbc.Col([
                             html.Label("Écart Min Achat/Vente :"),
-                            dbc.Input(id='config-decision-difference', type='number', value=default_config['decision']['conviction_difference'], min=0, max=2, step=0.1),
+                            # CORRECTION: min=0 pour permettre 0
+                            dbc.Input(id='config-decision-difference', type='number', 
+                                     value=default_config['decision']['conviction_difference'], 
+                                     min=0, max=5, step=0.1),
                         ], width=4),
                         dbc.Col([
                             html.Label("Pénalité Contre-Tendance :"),
-                            dbc.Input(id='config-decision-penalty', type='number', value=default_config['decision']['against_trend_penalty'], min=0, max=1, step=0.1),
+                            dbc.Input(id='config-decision-penalty', type='number', 
+                                     value=default_config['decision']['against_trend_penalty'], 
+                                     min=0, max=1, step=0.1),
                         ], width=4),
                     ], className="mb-2"),
                     dbc.Row([
                         dbc.Col([
                             html.Label("Niveau ADX pour Bonus :"),
-                            dbc.Input(id='config-decision-adx-level', type='number', value=default_config['decision']['adx_confirmation_level'], min=20, max=50),
+                            # CORRECTION: min=0 pour permettre 0
+                            dbc.Input(id='config-decision-adx-level', type='number', 
+                                     value=default_config['decision']['adx_confirmation_level'], 
+                                     min=0, max=50, step=1),
                         ], width=4),
                         dbc.Col([
                             html.Label("Multiplicateur Bonus ADX :"),
-                            dbc.Input(id='config-decision-adx-bonus', type='number', value=default_config['decision']['adx_confirmation_bonus'], min=1, max=2, step=0.1),
+                            dbc.Input(id='config-decision-adx-bonus', type='number', 
+                                     value=default_config['decision']['adx_confirmation_bonus'], 
+                                     min=1, max=2, step=0.1),
+                        ], width=4),
+                        dbc.Col([
+                            html.Label("Min. Combos pour Signal :"),
+                            # CORRECTION: min=0 pour permettre 0
+                            dbc.Input(id='config-decision-min-combos', type='number', 
+                                     value=default_config['decision'].get('min_combinations_for_signal', 1), 
+                                     min=0, max=5, step=1),
                         ], width=4),
                     ]),
                 ], title="🎯 Seuils de Décision"),

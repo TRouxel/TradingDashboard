@@ -86,6 +86,17 @@ def fetch_and_prepare_data(ticker, period="2y", return_full=False, config=None):
     """
     if config is None:
         config = get_default_config()
+        print("⚠️ fetch_and_prepare_data: config=None, utilisation des défauts")
+    else:
+        ind_cfg = config.get('individual_weights', {})
+        dec_cfg = config.get('decision', {})
+        print(f"\n{'='*60}")
+        print(f"📊 fetch_and_prepare_data pour {ticker}")
+        print(f"   >>> CONFIG REÇUE <<<")
+        print(f"   rsi_divergence = {ind_cfg.get('rsi_divergence')}")
+        print(f"   min_conviction_threshold = {dec_cfg.get('min_conviction_threshold')}")
+        print(f"   min_combinations_for_signal = {dec_cfg.get('min_combinations_for_signal')}")
+        print(f"{'='*60}\n")
     
     print(f"📊 Téléchargement des données pour {ticker}...")
     

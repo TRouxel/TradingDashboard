@@ -1,6 +1,7 @@
 # callbacks/performance_callbacks.py
 """
 Callbacks pour l'analyse de performance des indicateurs (backtesting).
+VERSION 2.0 - Affichage des rendements réels + Performance cumulée
 """
 from dash import html, Input, Output, State
 import dash_bootstrap_components as dbc
@@ -17,6 +18,7 @@ from components.performance_charts import (
     create_performance_section,
     create_performance_summary_cards,
     create_combination_ranking_table,
+    create_global_performance_summary,
     HORIZON_NAMES
 )
 
@@ -63,6 +65,10 @@ def register_performance_callbacks(app):
         if not selected_horizons:
             selected_horizons = [1, 2, 5, 10, 20]
         
+        # Récupérer le prix initial pour le calcul de performance
+        df = pd.DataFrame(data)
+        initial_price = df['close'].iloc[0] if 'close' in df.columns else None
+        
         # Séparer indicateurs individuels et combinaisons
         individual_perf = {k: v for k, v in performance_history.items() if k.startswith('📊')}
         buy_combos = {k: v for k, v in performance_history.items() if k.startswith('🟢')}
@@ -79,18 +85,24 @@ def register_performance_callbacks(app):
                 html.H5(f"📊 Backtesting des Indicateurs — {asset}", className="mb-2"),
                 html.P([
                     f"Basé sur {len(pd.DataFrame(data))} jours de données. ",
-                    html.Strong("Score positif = prédiction correcte"),
-                    ", ",
-                    html.Strong("négatif = incorrecte"),
-                    "."
+                    html.Strong("Les barres représentent le gain/perte réel en %"),
+                    " si on avait suivi le signal. ",
+                    html.Strong("Perf. Σ = somme des rendements"),
+                    " (performance cumulée)."
                 ], className="text-muted small mb-3"),
             ]),
             
+            # === RÉSUMÉ GLOBAL ===
+            html.H5("🏅 Résumé Global", className="mb-3"),
+            create_global_performance_summary(performance_history, selected_horizons, initial_price),
+            
+            html.Hr(className="my-4"),
+            
             # === SECTION 1: CLASSEMENT DES COMBINAISONS ===
-            html.H5("🏆 Classement des Combinaisons de Signaux", className="mb-3 mt-4"),
+            html.H5("🏆 Classement des Combinaisons de Signaux", className="mb-3"),
             html.P([
-                "Ces combinaisons sont celles utilisées dans le calcul de la recommandation. ",
-                "Elles combinent plusieurs indicateurs pour confirmer un signal."
+                "Classement basé sur la précision (% de signaux corrects). ",
+                "La colonne 'Perf. Σ' montre la performance cumulée en suivant chaque combinaison."
             ], className="text-muted small mb-3"),
             create_combination_ranking_table(combo_summary, selected_horizons),
             
@@ -105,6 +117,12 @@ def register_performance_callbacks(app):
             # === SECTION 3: DÉTAILS PAR INDICATEUR ===
             dbc.Accordion([
                 dbc.AccordionItem([
+                    html.P([
+                        "Chaque barre représente le ",
+                        html.Strong("rendement réel en %"),
+                        " qu'on aurait obtenu en suivant le signal. ",
+                        "Barre vers le haut = gain, vers le bas = perte."
+                    ], className="text-muted small mb-3"),
                     create_performance_section(individual_perf, selected_horizons),
                 ], title="📊 Détails des Indicateurs Individuels"),
                 
