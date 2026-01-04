@@ -1,29 +1,213 @@
-# callbacks/summary_callbacks.py
+# summary_callbacks.py
 """
 Callbacks pour le tableau récapitulatif des actifs.
+VERSION 2.0 - Optimisation du téléchargement des données
 """
 from dash import html, Input, Output, State, ALL, ctx, callback_context
 import dash_bootstrap_components as dbc
 import pandas as pd
+import numpy as np
+import yfinance as yf
 from datetime import datetime
 
-from data_handler import fetch_and_prepare_data
-from config import load_user_assets
+from config import load_user_assets, get_default_config, RSI, DIVERGENCE
 from components.summary_table import create_assets_summary_table
+
+
+def fetch_minimal_data_for_divergence(ticker, config=None):
+    """
+    Télécharge uniquement les données nécessaires pour calculer la divergence RSI.
+    Beaucoup plus léger que fetch_and_prepare_data car:
+    - Période courte (3 mois max au lieu de 6mo+)
+    - Calcule seulement RSI et divergence (pas MACD, Bollinger, patterns, etc.)
+    
+    Args:
+        ticker: Symbole de l'actif
+        config: Configuration (optionnel)
+    
+    Returns:
+        dict avec les infos nécessaires ou None si erreur
+    """
+    if config is None:
+        config = get_default_config()
+    
+    try:
+        # Télécharger seulement 3 mois de données (suffisant pour RSI 14 + divergence lookback 14*2 + marge)
+        df = yf.download(ticker, period="3mo", auto_adjust=True, progress=False)
+        
+        if df.empty or len(df) < 50:  # Minimum nécessaire pour des calculs fiables
+            return None
+        
+        # Normaliser les colonnes
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.droplevel(1)
+        df.columns = df.columns.str.lower()
+        
+        # Renommer pour cohérence
+        df.rename(columns={
+            'open': 'Open',
+            'high': 'High',
+            'low': 'Low',
+            'close': 'Close',
+            'volume': 'Volume'
+        }, inplace=True)
+        
+        # Calculer le RSI (minimal)
+        rsi_cfg = config.get('rsi', RSI)
+        rsi_period = rsi_cfg.get('period', 14)
+        
+        delta = df['Close'].diff()
+        gain = delta.where(delta > 0, 0)
+        loss = (-delta).where(delta < 0, 0)
+        
+        avg_gain = gain.rolling(window=rsi_period, min_periods=rsi_period).mean()
+        avg_loss = loss.rolling(window=rsi_period, min_periods=rsi_period).mean()
+        
+        # Éviter division par zéro
+        rs = avg_gain / avg_loss.replace(0, np.nan)
+        df['rsi'] = 100 - (100 / (1 + rs))
+        
+        # Détecter les divergences RSI (version simplifiée)
+        df['rsi_divergence'] = detect_rsi_divergence_fast(df, config)
+        
+        # Calculer la recommandation simplifiée basée sur RSI et divergence
+        df['recommendation'] = calculate_simple_recommendation(df, config)
+        
+        # Réinitialiser l'index pour avoir la colonne Date
+        df.reset_index(inplace=True)
+        df.rename(columns={'index': 'Date', 'date': 'Date'}, inplace=True)
+        if 'Date' not in df.columns and df.index.name:
+            df = df.reset_index()
+        
+        return df
+        
+    except Exception as e:
+        print(f"⚠️ Erreur fetch_minimal_data_for_divergence pour {ticker}: {e}")
+        return None
+
+
+def detect_rsi_divergence_fast(df, config):
+    """
+    Version optimisée de la détection de divergence RSI.
+    Ne regarde que les derniers jours (pas tout l'historique).
+    """
+    div_cfg = config.get('divergence', DIVERGENCE)
+    rsi_low = div_cfg.get('rsi_low_threshold', 40)
+    rsi_high = div_cfg.get('rsi_high_threshold', 60)
+    lookback = div_cfg.get('lookback_period', 14)
+    
+    divergences = ['none'] * len(df)
+    
+    # Ne calculer que sur les 30 derniers jours (suffisant pour détecter une divergence récente)
+    start_idx = max(lookback * 2 + 5, len(df) - 30)
+    
+    def find_local_min(series, idx, window=5):
+        if idx < window or idx >= len(series) - window:
+            return False
+        val = series.iloc[idx]
+        left_vals = series.iloc[idx-window:idx]
+        right_vals = series.iloc[idx+1:idx+window+1]
+        return val <= left_vals.min() and val <= right_vals.min()
+    
+    def find_local_max(series, idx, window=5):
+        if idx < window or idx >= len(series) - window:
+            return False
+        val = series.iloc[idx]
+        left_vals = series.iloc[idx-window:idx]
+        right_vals = series.iloc[idx+1:idx+window+1]
+        return val >= left_vals.max() and val >= right_vals.max()
+    
+    window = 5
+    min_distance = 5
+    max_distance = lookback * 2
+    
+    for i in range(start_idx, len(df) - window):
+        try:
+            rsi = df['rsi'].iloc[i]
+            price = df['Close'].iloc[i]
+            
+            if pd.isna(rsi):
+                continue
+            
+            # Divergence haussière
+            if find_local_min(df['Close'], i, window) and rsi < rsi_low:
+                for j in range(i - min_distance, max(i - max_distance, lookback), -1):
+                    if find_local_min(df['Close'], j, window):
+                        prev_price = df['Close'].iloc[j]
+                        prev_rsi = df['rsi'].iloc[j]
+                        
+                        if pd.isna(prev_rsi):
+                            continue
+                        
+                        if price < prev_price and rsi > prev_rsi:
+                            divergences[i] = 'bullish'
+                            break
+            
+            # Divergence baissière
+            elif find_local_max(df['Close'], i, window) and rsi > rsi_high:
+                for j in range(i - min_distance, max(i - max_distance, lookback), -1):
+                    if find_local_max(df['Close'], j, window):
+                        prev_price = df['Close'].iloc[j]
+                        prev_rsi = df['rsi'].iloc[j]
+                        
+                        if pd.isna(prev_rsi):
+                            continue
+                        
+                        if price > prev_price and rsi < prev_rsi:
+                            divergences[i] = 'bearish'
+                            break
+                            
+        except (IndexError, KeyError):
+            continue
+    
+    return divergences
+
+
+def calculate_simple_recommendation(df, config):
+    """
+    Calcul simplifié de la recommandation basé principalement sur RSI et divergence.
+    Pour le tableau récapitulatif, on n'a pas besoin de tous les indicateurs.
+    """
+    rsi_cfg = config.get('rsi', RSI)
+    recommendations = []
+    
+    for i in range(len(df)):
+        rsi = df['rsi'].iloc[i] if 'rsi' in df.columns else None
+        div = df['rsi_divergence'].iloc[i] if 'rsi_divergence' in df.columns else 'none'
+        
+        if pd.isna(rsi):
+            recommendations.append('Neutre')
+            continue
+        
+        # Priorité à la divergence
+        if div == 'bullish':
+            recommendations.append('Acheter')
+        elif div == 'bearish':
+            recommendations.append('Vendre')
+        # Sinon basé sur RSI extrême
+        elif rsi <= rsi_cfg.get('oversold', 30):
+            recommendations.append('Acheter')
+        elif rsi >= rsi_cfg.get('overbought', 70):
+            recommendations.append('Vendre')
+        else:
+            recommendations.append('Neutre')
+    
+    return recommendations
 
 
 def get_asset_rsi_summary(ticker, config):
     """
     Récupère les informations de divergence RSI pour un actif.
+    VERSION OPTIMISÉE: Utilise fetch_minimal_data_for_divergence au lieu de fetch_and_prepare_data
     
     Returns:
         dict: Données résumées pour l'actif
     """
     try:
-        # Récupérer les données avec une période suffisante pour détecter les divergences
-        df = fetch_and_prepare_data(ticker, period="6mo", config=config)
+        # Utiliser la fonction optimisée au lieu de fetch_and_prepare_data
+        df = fetch_minimal_data_for_divergence(ticker, config)
         
-        if df.empty:
+        if df is None or df.empty:
             return {
                 'ticker': ticker,
                 'rsi_divergence': 'none',
@@ -42,12 +226,12 @@ def get_asset_rsi_summary(ticker, config):
         # Dernière ligne pour les valeurs actuelles
         last_row = df.iloc[-1]
         
-        current_price = last_row.get('close', last_row.get('Close', 0))
+        current_price = last_row.get('Close', 0)
         rsi_value = last_row.get('rsi', 50)
         current_divergence = last_row.get('rsi_divergence', 'none')
         recommendation = last_row.get('recommendation', 'Neutre')
         
-        # Trouver la dernière divergence dans l'historique
+        # Trouver la dernière divergence dans l'historique (3 derniers mois)
         last_div_date = None
         last_div_type = 'none'
         
@@ -108,7 +292,8 @@ def register_summary_callbacks(app):
                 html.Strong("'Rafraîchir sélection'"),
                 ", ou utilisez ",
                 html.Strong("'Tout rafraîchir'"),
-                " pour analyser tous les actifs."
+                " pour analyser tous les actifs. ",
+                html.Span("(Calcul optimisé: ~3 mois de données)", className="text-info")
             ], className="text-muted")
         ], className="mb-2")
         
@@ -152,17 +337,23 @@ def register_summary_callbacks(app):
                     table
                 ])
         
-        # Récupérer les données pour chaque actif
+        # Récupérer les données pour chaque actif (VERSION OPTIMISÉE)
         summary_data = []
         errors = []
         
+        import time
+        start_time = time.time()
+        
         for ticker in tickers_to_refresh:
-            print(f"📊 Analyse de {ticker}...")
+            print(f"📊 Analyse rapide de {ticker}...")
             data = get_asset_rsi_summary(ticker, config)
             summary_data.append(data)
             
             if data.get('error'):
                 errors.append(ticker)
+        
+        elapsed = time.time() - start_time
+        print(f"✅ Analyse de {len(tickers_to_refresh)} actifs en {elapsed:.2f}s")
         
         # Si on n'a rafraîchi qu'une partie, garder les actifs non rafraîchis dans l'affichage
         # avec les données en cache si disponibles
@@ -234,7 +425,7 @@ def register_summary_callbacks(app):
                     dbc.Badge(f"🟢 {num_bullish} Achats", color="success", className="me-1"),
                     dbc.Badge(f"🔴 {num_bearish} Ventes", color="danger", className="me-1"),
                 ]),
-                f" | Dernière màj: {datetime.now().strftime('%H:%M:%S')}"
+                f" | ⚡ {elapsed:.1f}s | Dernière màj: {datetime.now().strftime('%H:%M:%S')}"
             ], className="text-muted")
         ], className="mb-2")
         

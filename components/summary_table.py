@@ -25,7 +25,7 @@ def create_assets_summary_table(summary_data, assets_list=None):
             last_div_date = asset_data.get('last_div_date')
             last_div_type = asset_data.get('last_div_type', 'none')
             current_price = asset_data.get('current_price', 0)
-            rsi_value = asset_data.get('rsi_value', 50)
+            rsi_value = asset_data.get('rsi_value')  # Peut être None
             recommendation = asset_data.get('recommendation', 'Neutre')
             
             # Badge pour divergence actuelle
@@ -87,13 +87,24 @@ def create_assets_summary_table(summary_data, assets_list=None):
             else:
                 reco_badge = dbc.Badge("⚪ Neutre", color="secondary")
             
-            # Couleur du RSI
-            if rsi_value < 30:
-                rsi_color = "#26a69a"  # Vert - survente
-            elif rsi_value > 70:
-                rsi_color = "#ef5350"  # Rouge - surachat
+            # Couleur du RSI - CORRECTION: Vérifier si rsi_value n'est pas None
+            if rsi_value is not None:
+                if rsi_value < 30:
+                    rsi_color = "#26a69a"  # Vert - survente
+                elif rsi_value > 70:
+                    rsi_color = "#ef5350"  # Rouge - surachat
+                else:
+                    rsi_color = "#ffffff"  # Blanc - neutre
+                rsi_display = f"{rsi_value:.1f}"
             else:
-                rsi_color = "#ffffff"  # Blanc - neutre
+                rsi_color = "#6c757d"  # Gris - pas de données
+                rsi_display = "N/A"
+            
+            # Prix - gérer le cas où current_price est None
+            if current_price is not None and current_price != 0:
+                price_display = f"${current_price:.2f}"
+            else:
+                price_display = "N/A"
             
             rows.append(
                 html.Tr([
@@ -114,13 +125,13 @@ def create_assets_summary_table(summary_data, assets_list=None):
                     ),
                     # Prix actuel
                     html.Td(
-                        f"${current_price:.2f}" if current_price else "N/A",
+                        price_display,
                         className="text-end",
                         style={'width': '90px'}
                     ),
                     # RSI
                     html.Td(
-                        html.Span(f"{rsi_value:.1f}", style={'color': rsi_color, 'fontWeight': 'bold'}),
+                        html.Span(rsi_display, style={'color': rsi_color, 'fontWeight': 'bold'}),
                         className="text-center",
                         style={'width': '60px'}
                     ),

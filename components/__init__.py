@@ -28,13 +28,22 @@ from .performance_charts import (
 )
 from .strategy_charts import (
     create_hold_and_sell_chart,
+    create_hold_and_sell_next_day_chart,
     create_buy_on_divergence_chart,
     create_strategy_stats_table,
     create_strategies_section,
-    create_comparison_chart,  # Nouvelle fonction
+    create_comparison_chart,
+    create_hold_sell_comparison_chart,
     HOLDING_COLORS
 )
 from .summary_table import (
     create_assets_summary_table,
     create_summary_section
+)
+from .divergence_timeline import (
+    create_divergence_timeline_chart,
+    create_divergence_timeline_section,
+    create_stats_summary,
+    calculate_strategy_stats,
+    generate_color_for_asset
 )

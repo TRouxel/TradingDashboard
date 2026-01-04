@@ -9,6 +9,7 @@ import dash_bootstrap_components as dbc
 from config import SIGNAL_TIMEFRAME, INDICATOR_DESCRIPTIONS, load_user_assets, get_default_config
 from .config_modal import create_config_modal
 from components.summary_table import create_summary_section
+from components.divergence_timeline import create_divergence_timeline_section
 
 
 def get_display_options():
@@ -127,8 +128,11 @@ def create_main_layout():
         
         html.Div(id='save-status', className="text-center mb-1"),
 
-        # === 0. TABLEAU RÉCAPITULATIF DES ACTIFS (NOUVEAU) ===
+        # === 0. TABLEAU RÉCAPITULATIF DES ACTIFS ===
         create_summary_section(),
+
+        # === 0b. TIMELINE DES DIVERGENCES RSI (NOUVEAU) ===
+        create_divergence_timeline_section(),
 
         # === 1. SYNTHÈSE TECHNIQUE (COLLAPSIBLE) ===
         dbc.Card([

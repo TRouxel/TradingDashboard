@@ -6,6 +6,7 @@ from .fundamental_callbacks import register_fundamental_callbacks
 from .performance_callbacks import register_performance_callbacks
 from .strategy_callbacks import register_strategy_callbacks
 from .summary_callbacks import register_summary_callbacks
+from .divergence_timeline_callbacks import register_divergence_timeline_callbacks
 
 
 def register_all_callbacks(app):
@@ -17,3 +18,4 @@ def register_all_callbacks(app):
     register_performance_callbacks(app)
     register_strategy_callbacks(app)
     register_summary_callbacks(app)
+    register_divergence_timeline_callbacks(app)

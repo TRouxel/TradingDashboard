@@ -303,7 +303,6 @@ def create_buy_on_divergence_chart(strategy_results, asset_name, df_prices, is_n
     
     return dcc.Graph(figure=fig, config={'displayModeBar': True, 'scrollZoom': True})
 
-
 def create_strategy_stats_table(strategy_results, strategy_type='hold_and_sell'):
     """
     Crée un tableau de statistiques pour une stratégie.
@@ -329,7 +328,6 @@ def create_strategy_stats_table(strategy_results, strategy_type='hold_and_sell')
             win_rate = stats.get('win_rate', 0)
             wr_color = '#26a69a' if win_rate >= 50 else '#ef5350'
             
-            # Colonnes de base
             row_cells = [
                 html.Td(f"{hold_days} jours", style={'fontWeight': 'bold'}),
                 html.Td(f"{ret:+.2f}%", style={'color': ret_color, 'fontWeight': 'bold'}),
@@ -350,8 +348,23 @@ def create_strategy_stats_table(strategy_results, strategy_type='hold_and_sell')
                 )
             
             row = html.Tr(row_cells)
+            
+        elif strategy_type == 'hold_and_sell_next_day':
+            # Colonnes pour hold & sell J+1 (avec slippage)
+            avg_slippage = stats.get('avg_slippage', 0)
+            slip_color = '#ef5350' if avg_slippage < 0 else '#26a69a' if avg_slippage > 0 else '#6c757d'
+            
+            row = html.Tr([
+                html.Td(f"{hold_days} jours", style={'fontWeight': 'bold'}),
+                html.Td(f"{ret:+.2f}%", style={'color': ret_color, 'fontWeight': 'bold'}),
+                html.Td(f"{stats['buy_hold_return']:.2f}%"),
+                html.Td(f"{outperf:+.2f}%", style={'color': outperf_color, 'fontWeight': 'bold'}),
+                html.Td(str(stats.get('num_sells', 0))),
+                html.Td(str(stats.get('num_buys', 0))),
+                html.Td(f"{avg_slippage:+.2f}%", style={'color': slip_color, 'fontSize': '11px'}),
+            ])
         else:
-            # Colonnes pour hold & sell
+            # Colonnes pour hold & sell standard
             row = html.Tr([
                 html.Td(f"{hold_days} jours", style={'fontWeight': 'bold'}),
                 html.Td(f"{ret:+.2f}%", style={'color': ret_color, 'fontWeight': 'bold'}),
@@ -387,6 +400,16 @@ def create_strategy_stats_table(strategy_results, strategy_type='hold_and_sell')
             html.Th("Gain Moy."),
             html.Th("Perte Moy."),
         ]))
+    elif strategy_type == 'hold_and_sell_next_day':
+        header = html.Thead(html.Tr([
+            html.Th("Période Rebuy"),
+            html.Th("Rendement"),
+            html.Th("Buy&Hold"),
+            html.Th("Surperf."),
+            html.Th("Ventes"),
+            html.Th("Rachats"),
+            html.Th("Slippage", style={'fontSize': '11px'}),
+        ]))
     else:
         header = html.Thead(html.Tr([
             html.Th("Période Rebuy"),
@@ -399,7 +422,6 @@ def create_strategy_stats_table(strategy_results, strategy_type='hold_and_sell')
     
     return dbc.Table([header, html.Tbody(rows)], 
                      bordered=True, color="dark", hover=True, size="sm", responsive=True)
-
 
 def create_comparison_chart(results_immediate, results_next_day, asset_name):
     """
@@ -458,11 +480,10 @@ def create_comparison_chart(results_immediate, results_next_day, asset_name):
     
     return dcc.Graph(figure=fig, config={'displayModeBar': False})
 
-
 def create_strategies_section(df, asset_name, spread_pct=0.5):
     """
     Crée la section complète des stratégies de trading.
-    VERSION 2.0 - Avec stratégie J+1
+    VERSION 3.0 - Avec stratégies J+1 pour Hold & Sell et Buy on Divergence
     """
     from trading_strategies import create_strategy_comparison_data
     
@@ -473,6 +494,7 @@ def create_strategies_section(df, asset_name, spread_pct=0.5):
     results = create_strategy_comparison_data(df, spread_pct)
     
     hold_sell_results = results['hold_and_sell']
+    hold_sell_next_day_results = results['hold_and_sell_next_day']
     buy_div_results = results['buy_on_divergence']
     buy_div_next_day_results = results['buy_on_divergence_next_day']
     buy_hold_return = results['buy_hold_return']
@@ -528,15 +550,21 @@ def create_strategies_section(df, asset_name, spread_pct=0.5):
             ], width=2),
         ], className="mb-4"),
         
-        # === STRATÉGIE 1: HOLD & SELL ===
+        # ============================================
+        # === STRATÉGIES HOLD & SELL (DIVERGENCE BAISSIÈRE) ===
+        # ============================================
         html.Hr(),
-        html.H5("📈 Stratégie 1: Hold & Sell on RSI Divergence", className="mb-2"),
+        html.H4("🔴 Stratégies basées sur la Divergence BAISSIÈRE (Vente)", className="mb-3 text-danger"),
+        
+        # === STRATÉGIE 1: HOLD & SELL (IMMÉDIAT) ===
+        html.H5("📈 Stratégie 1: Hold & Sell on RSI Divergence (Vente immédiate)", className="mb-2"),
         html.P([
             "Cette stratégie est adaptée aux actifs que vous souhaitez ",
             html.Strong("garder en portefeuille à long terme"),
             " (ex: ETF S&P500, actions de qualité). ",
-            "Elle achète au début de la période, vend sur divergence baissière RSI, ",
-            "puis rachète automatiquement après N jours."
+            "Elle achète au début de la période, vend sur divergence baissière RSI ",
+            html.Strong("le jour même"),
+            ", puis rachète automatiquement après N jours."
         ], className="text-muted small mb-3"),
         
         dbc.Row([
@@ -549,8 +577,56 @@ def create_strategies_section(df, asset_name, spread_pct=0.5):
             ], width=4),
         ], className="mb-4"),
         
-        # === STRATÉGIE 2: BUY ON DIVERGENCE (IMMÉDIAT) ===
+        # === STRATÉGIE 1b: HOLD & SELL (J+1) ===
         html.Hr(),
+        html.H5([
+            "📈 Stratégie 1b: Hold & Sell on RSI Divergence ",
+            dbc.Badge("J+1", color="warning", className="ms-2"),
+            html.Small(" (Vente à l'ouverture du lendemain)", className="text-muted")
+        ], className="mb-2"),
+        html.P([
+            html.Strong("Version RÉALISTE: "),
+            "Le signal de divergence baissière est détecté après la clôture du jour J. ",
+            "L'ordre de vente est passé pour l'",
+            html.Strong("ouverture du jour J+1"),
+            ". ",
+            "La colonne 'Slippage' montre l'écart moyen entre le prix de clôture du signal et le prix d'ouverture d'exécution."
+        ], className="text-muted small mb-3"),
+        
+        dbc.Alert([
+            html.Strong("💡 Pourquoi cette stratégie? "),
+            "En pratique, vous recevez l'alerte de divergence après la clôture du marché. ",
+            "Vous ne pouvez donc vendre qu'à l'ouverture du lendemain. ",
+            "Cette simulation reflète ce scénario réel."
+        ], color="info", className="mb-3"),
+        
+        dbc.Row([
+            dbc.Col([
+                create_hold_and_sell_next_day_chart(hold_sell_next_day_results, asset_name, df)
+            ], width=8),
+            dbc.Col([
+                html.H6("📊 Statistiques", className="mb-2"),
+                create_strategy_stats_table(hold_sell_next_day_results, 'hold_and_sell_next_day')
+            ], width=4),
+        ], className="mb-4"),
+        
+        # === COMPARAISON HOLD & SELL ===
+        html.Hr(),
+        html.H5("⚖️ Comparaison Hold & Sell: Impact du délai de vente", className="mb-3"),
+        html.P([
+            "Ce graphique montre la différence de performance entre une vente immédiate (idéale) ",
+            "et une vente à l'ouverture du lendemain (réaliste)."
+        ], className="text-muted small mb-3"),
+        
+        create_hold_sell_comparison_chart(hold_sell_results, hold_sell_next_day_results, asset_name),
+        
+        # ============================================
+        # === STRATÉGIES BUY ON DIVERGENCE (DIVERGENCE HAUSSIÈRE) ===
+        # ============================================
+        html.Hr(className="my-4"),
+        html.H4("🟢 Stratégies basées sur la Divergence HAUSSIÈRE (Achat)", className="mb-3 text-success"),
+        
+        # === STRATÉGIE 2: BUY ON DIVERGENCE (IMMÉDIAT) ===
         html.H5("📊 Stratégie 2: Buy on RSI Bullish Divergence (Achat immédiat)", className="mb-2"),
         html.P([
             "Achat ",
@@ -585,13 +661,6 @@ def create_strategies_section(df, asset_name, spread_pct=0.5):
             "La colonne 'Slippage' montre l'écart moyen entre le prix de clôture du signal et le prix d'ouverture d'exécution."
         ], className="text-muted small mb-3"),
         
-        dbc.Alert([
-            html.Strong("💡 Pourquoi cette stratégie? "),
-            "En pratique, vous recevez l'alerte de divergence après la clôture du marché. ",
-            "Vous ne pouvez donc acheter qu'à l'ouverture du lendemain. ",
-            "Cette simulation reflète ce scénario réel."
-        ], color="info", className="mb-3"),
-        
         dbc.Row([
             dbc.Col([
                 create_buy_on_divergence_chart(buy_div_next_day_results, asset_name, df, is_next_day=True)
@@ -602,19 +671,18 @@ def create_strategies_section(df, asset_name, spread_pct=0.5):
             ], width=4),
         ], className="mb-4"),
         
-        # === COMPARAISON DES STRATÉGIES 2 ET 3 ===
+        # === COMPARAISON BUY ON DIVERGENCE ===
         html.Hr(),
-        html.H5("⚖️ Comparaison: Impact du délai d'exécution", className="mb-3"),
+        html.H5("⚖️ Comparaison Buy on Divergence: Impact du délai d'achat", className="mb-3"),
         html.P([
             "Ce graphique montre la différence de performance entre un achat immédiat (idéal) ",
-            "et un achat à l'ouverture du lendemain (réaliste). ",
-            "Un écart important suggère que le timing d'entrée est crucial pour cet actif."
+            "et un achat à l'ouverture du lendemain (réaliste)."
         ], className="text-muted small mb-3"),
         
         create_comparison_chart(buy_div_results, buy_div_next_day_results, asset_name),
         
         # === LÉGENDE / EXPLICATIONS ===
-        html.Hr(),
+        html.Hr(className="my-4"),
         dbc.Card([
             dbc.CardBody([
                 html.H6("📖 Légende et interprétation", className="mb-3"),
@@ -623,18 +691,37 @@ def create_strategies_section(df, asset_name, spread_pct=0.5):
                         html.Strong("Slippage moyen:", className="text-warning"),
                         html.P([
                             "Écart entre le prix de clôture (signal) et le prix d'ouverture (exécution). ",
-                            html.Span("Positif = vous payez plus cher", style={'color': '#ef5350'}),
+                            html.Span("Positif = vous payez plus cher (achat) ou vendez moins cher (vente)", style={'color': '#ef5350'}),
                             ", ",
-                            html.Span("Négatif = vous payez moins cher", style={'color': '#26a69a'}),
+                            html.Span("Négatif = inverse", style={'color': '#26a69a'}),
                             "."
                         ], className="small mb-0")
                     ], width=6),
                     dbc.Col([
                         html.Strong("Interprétation:", className="text-info"),
                         html.P([
-                            "Si la stratégie J+1 performe presque aussi bien que l'achat immédiat, ",
+                            "Si la stratégie J+1 performe presque aussi bien que l'exécution immédiate, ",
                             "c'est bon signe: le timing précis n'est pas critique. ",
-                            "Si la différence est grande, le prix d'entrée est crucial."
+                            "Si la différence est grande, le prix d'entrée/sortie est crucial."
+                        ], className="small mb-0")
+                    ], width=6),
+                ]),
+                html.Hr(className="my-2"),
+                dbc.Row([
+                    dbc.Col([
+                        html.Strong("🔴 Hold & Sell (Divergence Baissière):", className="text-danger"),
+                        html.P([
+                            "Pour les investisseurs long terme qui veulent ",
+                            html.Strong("réduire le drawdown"),
+                            " en vendant temporairement lors de signaux de retournement baissier."
+                        ], className="small mb-0")
+                    ], width=6),
+                    dbc.Col([
+                        html.Strong("🟢 Buy on Divergence (Divergence Haussière):", className="text-success"),
+                        html.P([
+                            "Pour les traders actifs qui veulent ",
+                            html.Strong("acheter les creux"),
+                            " identifiés par les divergences RSI haussières."
                         ], className="small mb-0")
                     ], width=6),
                 ])
@@ -643,3 +730,201 @@ def create_strategies_section(df, asset_name, spread_pct=0.5):
     ])
     
     return content
+
+
+def create_hold_and_sell_next_day_chart(strategy_results, asset_name, df_prices):
+    """
+    Crée le graphique pour la stratégie Hold & Sell on RSI Divergence (J+1).
+    
+    Affiche:
+    - Courbe d'équité pour chaque période de holding
+    - Courbe Buy & Hold pour comparaison
+    - Points de vente (divergence baissière, exécutée à J+1)
+    - Points de rachat
+    """
+    if not strategy_results:
+        return html.P("Aucune donnée de stratégie disponible.", className="text-muted")
+    
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.08,
+        row_heights=[0.7, 0.3],
+        subplot_titles=("Évolution du Capital (Vente J+1)", "Prix de l'actif")
+    )
+    
+    # Ajouter le Buy & Hold comme référence
+    first_key = list(strategy_results.keys())[0]
+    equity_df = strategy_results[first_key]['equity_curve']
+    
+    # Normaliser le prix pour la comparaison (base 100)
+    if not equity_df.empty:
+        initial_price = equity_df.iloc[0]['close']
+        buy_hold_curve = (equity_df['close'] / initial_price) * 100
+        
+        fig.add_trace(go.Scatter(
+            x=equity_df['Date'],
+            y=buy_hold_curve,
+            mode='lines',
+            name='Buy & Hold',
+            line=dict(color='white', width=2, dash='dash'),
+            opacity=0.7
+        ), row=1, col=1)
+    
+    # Ajouter les courbes d'équité pour chaque période
+    for hold_days, data in strategy_results.items():
+        equity_df = data['equity_curve']
+        color = HOLDING_COLORS.get(hold_days, '#ffffff')
+        
+        fig.add_trace(go.Scatter(
+            x=equity_df['Date'],
+            y=equity_df['portfolio_value'],
+            mode='lines',
+            name=f'{hold_days}j (rebuy)',
+            line=dict(color=color, width=2),
+            hovertemplate=(
+                f"<b>{hold_days} jours</b><br>"
+                "Date: %{x}<br>"
+                "Capital: %{y:.2f}<br>"
+                "<extra></extra>"
+            )
+        ), row=1, col=1)
+        
+        # Ajouter les points de trade (ventes avec signal_date)
+        trades = data['trades']
+        sell_trades = [t for t in trades if t['type'] == 'SELL']
+        
+        if sell_trades:
+            sell_dates = [t['date'] for t in sell_trades]
+            sell_values = []
+            hover_texts = []
+            
+            for t in sell_trades:
+                sd = t['date']
+                idx = equity_df[equity_df['Date'] == sd].index
+                if len(idx) > 0:
+                    sell_values.append(equity_df.loc[idx[0], 'portfolio_value'])
+                else:
+                    sell_values.append(None)
+                
+                # Afficher la date du signal si disponible
+                signal_date = t.get('signal_date')
+                if signal_date:
+                    hover_texts.append(f"VENTE (signal: {signal_date.strftime('%d/%m')})")
+                else:
+                    hover_texts.append("VENTE")
+            
+            fig.add_trace(go.Scatter(
+                x=sell_dates,
+                y=sell_values,
+                mode='markers',
+                name=f'Ventes ({hold_days}j)',
+                marker=dict(symbol='triangle-down', size=10, color='#ef5350'),
+                showlegend=False,
+                text=hover_texts,
+                hovertemplate="%{text}<br>Date exec: %{x}<br><extra></extra>"
+            ), row=1, col=1)
+    
+    # Graphique des prix en bas
+    fig.add_trace(go.Scatter(
+        x=equity_df['Date'],
+        y=equity_df['close'],
+        mode='lines',
+        name='Prix',
+        line=dict(color='#888888', width=1),
+        showlegend=False
+    ), row=2, col=1)
+    
+    # Marquer les divergences baissières sur le prix
+    if not df_prices.empty and 'rsi_divergence' in df_prices.columns:
+        bearish_div = df_prices[df_prices['rsi_divergence'] == 'bearish']
+        if not bearish_div.empty:
+            fig.add_trace(go.Scatter(
+                x=bearish_div['Date'],
+                y=bearish_div['close'],
+                mode='markers',
+                name='Div. Baissière',
+                marker=dict(symbol='triangle-down', size=12, color='#ef5350', line=dict(width=1, color='white')),
+            ), row=2, col=1)
+    
+    fig.update_layout(
+        template='plotly_dark',
+        height=500,
+        title=dict(
+            text=f"📈 Stratégie Hold & Sell (J+1) — {asset_name}",
+            font=dict(size=14)
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            font=dict(size=10)
+        ),
+        margin=dict(l=50, r=50, t=80, b=30),
+        hovermode='x unified'
+    )
+    
+    fig.update_yaxes(title_text="Capital (base 100)", row=1, col=1)
+    fig.update_yaxes(title_text="Prix", row=2, col=1)
+    
+    return dcc.Graph(figure=fig, config={'displayModeBar': True, 'scrollZoom': True})
+
+
+def create_hold_sell_comparison_chart(results_immediate, results_next_day, asset_name):
+    """
+    Crée un graphique comparant les deux stratégies Hold & Sell (immédiat vs J+1).
+    """
+    if not results_immediate or not results_next_day:
+        return html.P("Données insuffisantes pour la comparaison.", className="text-muted")
+    
+    fig = go.Figure()
+    
+    periods = sorted(results_immediate.keys())
+    
+    # Barres pour stratégie immédiate
+    returns_immediate = [results_immediate[p]['stats']['total_return'] for p in periods]
+    returns_next_day = [results_next_day[p]['stats']['total_return'] for p in periods]
+    
+    fig.add_trace(go.Bar(
+        name='Vente immédiate (J)',
+        x=[f"{p}j" for p in periods],
+        y=returns_immediate,
+        marker_color='#ef5350',
+        text=[f"{r:+.1f}%" for r in returns_immediate],
+        textposition='outside'
+    ))
+    
+    fig.add_trace(go.Bar(
+        name='Vente J+1 (ouverture)',
+        x=[f"{p}j" for p in periods],
+        y=returns_next_day,
+        marker_color='#ff8c00',
+        text=[f"{r:+.1f}%" for r in returns_next_day],
+        textposition='outside'
+    ))
+    
+    fig.add_hline(y=0, line_dash="solid", line_color="white", opacity=0.5)
+    
+    fig.update_layout(
+        template='plotly_dark',
+        height=300,
+        title=dict(
+            text=f"📊 Comparaison Hold & Sell: Vente J vs Vente J+1 — {asset_name}",
+            font=dict(size=14)
+        ),
+        barmode='group',
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        ),
+        margin=dict(l=50, r=50, t=60, b=30),
+        xaxis_title="Période avant rachat",
+        yaxis_title="Rendement total (%)"
+    )
+    
+    return dcc.Graph(figure=fig, config={'displayModeBar': False})
