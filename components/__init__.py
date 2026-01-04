@@ -31,6 +31,7 @@ from .strategy_charts import (
     create_buy_on_divergence_chart,
     create_strategy_stats_table,
     create_strategies_section,
+    create_comparison_chart,  # Nouvelle fonction
     HOLDING_COLORS
 )
 from .summary_table import (

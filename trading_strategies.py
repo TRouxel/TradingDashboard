@@ -1,11 +1,12 @@
 # trading_strategies.py
 """
 Module de simulation de stratégies de trading basées sur la divergence RSI.
-VERSION 1.0
+VERSION 2.0 - Ajout de la simulation avec achat différé (ouverture J+1)
 
-Deux stratégies:
+Trois stratégies:
 1. Hold & Sell on RSI Divergence: Achète au début, vend sur divergence baissière, rachète N jours après
 2. Buy on RSI Divergence: N'achète que sur divergence haussière, revend N jours après
+3. Buy on RSI Divergence (J+1): Comme la 2, mais achat à l'ouverture du lendemain (plus réaliste)
 """
 import pandas as pd
 import numpy as np
@@ -320,19 +321,217 @@ def simulate_buy_on_divergence_strategy(df, holding_periods=[1, 2, 5, 10, 20], s
     return results
 
 
+def simulate_buy_on_divergence_next_day(df, holding_periods=[1, 2, 5, 10, 20], spread_pct=0.5):
+    """
+    Stratégie 3: Buy on RSI Bullish Divergence (Achat J+1 à l'ouverture)
+    
+    Version RÉALISTE de la stratégie 2:
+    - Détecte la divergence RSI haussière en fin de journée J
+    - Achète à l'OUVERTURE du jour J+1 (plus réaliste car on reçoit le signal après la clôture)
+    - Revend automatiquement N jours plus tard
+    - Pas de vente à découvert (short)
+    - Le spread (coût de transaction) est appliqué à chaque achat/vente
+    
+    Args:
+        df: DataFrame avec les données et indicateurs
+        holding_periods: Liste des périodes de détention après achat (en jours)
+        spread_pct: Écart achat/vente en % du prix
+    
+    Returns:
+        dict: Résultats pour chaque période de holding
+    """
+    if df.empty or 'rsi_divergence' not in df.columns:
+        return {}
+    
+    df = df.copy()
+    df = df.sort_values('Date').reset_index(drop=True)
+    
+    # S'assurer que les colonnes existent
+    if 'close' not in df.columns and 'Close' in df.columns:
+        df['close'] = df['Close']
+    if 'open' not in df.columns and 'Open' in df.columns:
+        df['open'] = df['Open']
+    
+    # Si pas de colonne 'open', utiliser 'close' comme fallback
+    if 'open' not in df.columns:
+        df['open'] = df['close']
+    
+    results = {}
+    
+    for hold_days in holding_periods:
+        equity_curve = []
+        trades = []
+        
+        # Capital initial normalisé à 100
+        capital = 100.0
+        position = 0
+        in_position = False
+        sell_date = None
+        entry_price = None
+        pending_buy_signal = False  # Signal d'achat en attente pour le lendemain
+        signal_date = None  # Date où le signal a été détecté
+        
+        for idx in range(len(df)):
+            row = df.iloc[idx]
+            current_date = row['Date']
+            current_price = row['close']
+            open_price = row['open']
+            rsi_div = row.get('rsi_divergence', 'none')
+            
+            # === EXÉCUTER L'ACHAT DIFFÉRÉ (à l'ouverture) ===
+            if pending_buy_signal and not in_position:
+                # On est le lendemain du signal, on achète à l'ouverture
+                buy_price = open_price + (open_price * spread_pct / 100) / 2
+                position = capital / buy_price
+                entry_price = buy_price
+                in_position = True
+                capital = 0
+                
+                # Calculer la date de vente (N jours après l'achat effectif)
+                sell_date = current_date + timedelta(days=hold_days)
+                
+                trades.append({
+                    'date': current_date,
+                    'type': 'BUY',
+                    'price': buy_price,
+                    'units': position,
+                    'signal_date': signal_date,  # Date du signal original
+                    'reason': f'RSI bullish divergence (signal J-1, exec open J)'
+                })
+                
+                pending_buy_signal = False
+                signal_date = None
+            
+            # === VÉRIFIER SI ON DOIT VENDRE ===
+            if in_position and sell_date is not None:
+                if current_date >= sell_date:
+                    # Vendre à la clôture
+                    sell_price = current_price - (current_price * spread_pct / 100) / 2
+                    capital = position * sell_price
+                    
+                    # Calculer le profit/perte
+                    pnl = (sell_price / entry_price - 1) * 100
+                    
+                    trades.append({
+                        'date': current_date,
+                        'type': 'SELL',
+                        'price': sell_price,
+                        'units': position,
+                        'pnl_pct': pnl,
+                        'reason': f'Auto-sell after {hold_days} days'
+                    })
+                    
+                    position = 0
+                    in_position = False
+                    sell_date = None
+                    entry_price = None
+            
+            # === DÉTECTER UN NOUVEAU SIGNAL (pour exécution le lendemain) ===
+            if not in_position and not pending_buy_signal and rsi_div == 'bullish':
+                # On détecte le signal aujourd'hui, on achètera demain à l'ouverture
+                pending_buy_signal = True
+                signal_date = current_date
+            
+            # === CALCULER LA VALEUR DU PORTEFEUILLE ===
+            if in_position:
+                portfolio_value = position * current_price
+            else:
+                portfolio_value = capital
+            
+            equity_curve.append({
+                'Date': current_date,
+                'portfolio_value': portfolio_value,
+                'in_position': in_position,
+                'pending_signal': pending_buy_signal,
+                'close': current_price,
+                'open': open_price
+            })
+        
+        # Si encore en position à la fin, vendre
+        if in_position:
+            final_price = df.iloc[-1]['close']
+            sell_price = final_price - (final_price * spread_pct / 100) / 2
+            capital = position * sell_price
+            pnl = (sell_price / entry_price - 1) * 100
+            
+            trades.append({
+                'date': df.iloc[-1]['Date'],
+                'type': 'SELL',
+                'price': sell_price,
+                'units': position,
+                'pnl_pct': pnl,
+                'reason': 'End of period'
+            })
+        
+        # Si signal en attente à la fin (pas de jour suivant pour exécuter)
+        # On ignore ce signal car on n'a pas pu l'exécuter
+        
+        # Statistiques
+        equity_df = pd.DataFrame(equity_curve)
+        final_value = equity_df.iloc[-1]['portfolio_value']
+        total_return = (final_value / 100 - 1) * 100
+        
+        # Buy & hold pour comparaison
+        buy_hold_return = (df.iloc[-1]['close'] / df.iloc[0]['close'] - 1) * 100
+        
+        # Calculer les stats des trades
+        winning_trades = [t for t in trades if t['type'] == 'SELL' and t.get('pnl_pct', 0) > 0]
+        losing_trades = [t for t in trades if t['type'] == 'SELL' and t.get('pnl_pct', 0) <= 0]
+        all_sell_trades = [t for t in trades if t['type'] == 'SELL']
+        
+        win_rate = len(winning_trades) / len(all_sell_trades) * 100 if all_sell_trades else 0
+        avg_win = np.mean([t['pnl_pct'] for t in winning_trades]) if winning_trades else 0
+        avg_loss = np.mean([t['pnl_pct'] for t in losing_trades]) if losing_trades else 0
+        
+        # Calculer le slippage moyen (différence entre close du signal et open d'exécution)
+        buy_trades = [t for t in trades if t['type'] == 'BUY']
+        slippages = []
+        for trade in buy_trades:
+            if 'signal_date' in trade and trade['signal_date'] is not None:
+                signal_idx = df[df['Date'] == trade['signal_date']].index
+                if len(signal_idx) > 0:
+                    signal_close = df.iloc[signal_idx[0]]['close']
+                    exec_open = trade['price'] - (trade['price'] * spread_pct / 100) / 2  # Prix sans spread
+                    slippage = (exec_open / signal_close - 1) * 100
+                    slippages.append(slippage)
+        
+        avg_slippage = np.mean(slippages) if slippages else 0
+        
+        results[hold_days] = {
+            'equity_curve': equity_df,
+            'trades': trades,
+            'stats': {
+                'total_return': total_return,
+                'buy_hold_return': buy_hold_return,
+                'outperformance': total_return - buy_hold_return,
+                'num_trades': len(all_sell_trades),
+                'win_rate': win_rate,
+                'avg_win': avg_win,
+                'avg_loss': avg_loss,
+                'final_value': final_value,
+                'avg_slippage': avg_slippage,  # Nouveau: slippage moyen
+                'missed_signals': 1 if pending_buy_signal else 0  # Signaux non exécutés
+            }
+        }
+    
+    return results
+
+
 def create_strategy_comparison_data(df, spread_pct=0.5, holding_periods=[1, 2, 5, 10, 20]):
     """
-    Crée les données de comparaison pour les deux stratégies.
+    Crée les données de comparaison pour les trois stratégies.
     
     Returns:
         dict: {
             'hold_and_sell': résultats stratégie 1,
-            'buy_on_divergence': résultats stratégie 2,
+            'buy_on_divergence': résultats stratégie 2 (achat immédiat),
+            'buy_on_divergence_next_day': résultats stratégie 3 (achat J+1),
             'buy_hold': rendement buy & hold
         }
     """
     hold_sell_results = simulate_hold_and_sell_strategy(df, holding_periods, spread_pct)
     buy_div_results = simulate_buy_on_divergence_strategy(df, holding_periods, spread_pct)
+    buy_div_next_day_results = simulate_buy_on_divergence_next_day(df, holding_periods, spread_pct)
     
     # Buy & hold simple
     if not df.empty and 'close' in df.columns:
@@ -343,6 +542,7 @@ def create_strategy_comparison_data(df, spread_pct=0.5, holding_periods=[1, 2, 5
     return {
         'hold_and_sell': hold_sell_results,
         'buy_on_divergence': buy_div_results,
+        'buy_on_divergence_next_day': buy_div_next_day_results,
         'buy_hold_return': buy_hold_return
     }
 
@@ -353,7 +553,7 @@ def calculate_strategy_summary(strategy_results, strategy_type='hold_and_sell'):
     
     Args:
         strategy_results: Résultats d'une stratégie (dict par période)
-        strategy_type: 'hold_and_sell' ou 'buy_on_divergence'
+        strategy_type: 'hold_and_sell', 'buy_on_divergence', ou 'buy_on_divergence_next_day'
     
     Returns:
         pd.DataFrame: Tableau récapitulatif
@@ -371,11 +571,15 @@ def calculate_strategy_summary(strategy_results, strategy_type='hold_and_sell'):
             'final_value': stats['final_value']
         }
         
-        if strategy_type == 'buy_on_divergence':
+        if strategy_type in ['buy_on_divergence', 'buy_on_divergence_next_day']:
             row['num_trades'] = stats.get('num_trades', 0)
             row['win_rate'] = stats.get('win_rate', 0)
             row['avg_win'] = stats.get('avg_win', 0)
             row['avg_loss'] = stats.get('avg_loss', 0)
+            
+            # Colonnes spécifiques à la stratégie J+1
+            if strategy_type == 'buy_on_divergence_next_day':
+                row['avg_slippage'] = stats.get('avg_slippage', 0)
         else:
             row['num_sells'] = stats.get('num_sells', 0)
             row['num_buys'] = stats.get('num_buys', 0)
