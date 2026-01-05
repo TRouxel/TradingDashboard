@@ -38,12 +38,15 @@ from .strategy_charts import (
 )
 from .summary_table import (
     create_assets_summary_table,
-    create_summary_section
+    create_summary_section,
+    create_asset_row,
+    create_category_table
 )
 from .divergence_timeline import (
     create_divergence_timeline_chart,
     create_divergence_timeline_section,
     create_stats_summary,
     calculate_strategy_stats,
-    generate_color_for_asset
+    generate_color_for_asset,
+    get_category_filter_options
 )

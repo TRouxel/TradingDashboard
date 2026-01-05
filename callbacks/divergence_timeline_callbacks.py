@@ -1,6 +1,7 @@
 # callbacks/divergence_timeline_callbacks.py
 """
 Callbacks pour le graphique timeline des divergences RSI.
+VERSION 2.0 - Filtre par catégorie d'actifs
 """
 from dash import html, Input, Output, State, dcc
 import dash_bootstrap_components as dbc
@@ -8,25 +9,18 @@ import pandas as pd
 from datetime import datetime
 
 from data_handler import fetch_and_prepare_data
-from config import load_user_assets
+from config import load_user_assets, load_user_assets_with_categories, ASSET_CATEGORIES, get_asset_category
 from components.divergence_timeline import (
     create_divergence_timeline_chart,
     create_stats_summary,
-    calculate_strategy_stats
+    calculate_strategy_stats,
+    generate_color_for_asset
 )
 
 
 def get_all_divergences(assets, period, config):
     """
     Récupère toutes les divergences RSI pour tous les actifs sur une période.
-    
-    Args:
-        assets: Liste des tickers
-        period: Période (ex: '1y', '2y', '6mo')
-        config: Configuration
-    
-    Returns:
-        Liste de dict avec 'date', 'ticker', 'type', 'price'
     """
     all_divergences = []
     
@@ -38,11 +32,9 @@ def get_all_divergences(assets, period, config):
             if df.empty:
                 continue
             
-            # Convertir la date si nécessaire
             if 'Date' in df.columns:
                 df['Date'] = pd.to_datetime(df['Date'])
             
-            # Filtrer les lignes avec divergence RSI
             if 'rsi_divergence' in df.columns:
                 div_df = df[df['rsi_divergence'].isin(['bullish', 'bearish'])].copy()
                 
@@ -63,10 +55,34 @@ def get_all_divergences(assets, period, config):
             print(f"⚠️ Erreur pour {ticker}: {e}")
             continue
     
-    # Trier par date
     all_divergences.sort(key=lambda x: x['date'])
     
     return all_divergences
+
+
+def filter_assets_by_category(assets, category_filter):
+    """
+    Filtre les actifs par catégorie.
+    
+    Args:
+        assets: Liste des tickers
+        category_filter: 'all' ou une clé de catégorie
+    
+    Returns:
+        Liste des tickers filtrés
+    """
+    if category_filter == 'all':
+        return assets
+    
+    assets_with_cats = load_user_assets_with_categories()
+    
+    filtered = []
+    for ticker in assets:
+        cat = assets_with_cats.get(ticker, get_asset_category(ticker))
+        if cat == category_filter:
+            filtered.append(ticker)
+    
+    return filtered
 
 
 def register_divergence_timeline_callbacks(app):
@@ -87,10 +103,11 @@ def register_divergence_timeline_callbacks(app):
         [State('assets-store', 'data'),
          State('period-dropdown', 'value'),
          State('config-store', 'data'),
-         State('holding-period-input', 'value')],
+         State('holding-period-input', 'value'),
+         State('timeline-category-filter', 'value')],
         prevent_initial_call=True
     )
-    def calculate_divergence_timeline(n_clicks, assets, period, config, holding_period):
+    def calculate_divergence_timeline(n_clicks, assets, period, config, holding_period, category_filter):
         if not assets:
             assets = load_user_assets()
         
@@ -99,6 +116,22 @@ def register_divergence_timeline_callbacks(app):
         
         if holding_period is None or holding_period < 1:
             holding_period = 11
+        
+        if category_filter is None:
+            category_filter = 'all'
+        
+        # Filtrer les actifs par catégorie
+        filtered_assets = filter_assets_by_category(assets, category_filter)
+        
+        if not filtered_assets:
+            cat_info = ASSET_CATEGORIES.get(category_filter, ASSET_CATEGORIES['custom'])
+            return html.Div([
+                dbc.Alert([
+                    f"Aucun actif dans la catégorie ",
+                    html.Strong(f"{cat_info['icon']} {cat_info['name']}"),
+                    ". Ajoutez des actifs de cette catégorie ou sélectionnez 'Tous les actifs'."
+                ], color="warning")
+            ])
         
         # Mapper la période pour l'affichage
         period_labels = {
@@ -113,14 +146,23 @@ def register_divergence_timeline_callbacks(app):
         }
         period_label = period_labels.get(period, period)
         
+        # Construire le label complet
+        if category_filter == 'all':
+            full_label = f"{period_label} — Tous les actifs ({len(filtered_assets)})"
+        else:
+            cat_info = ASSET_CATEGORIES.get(category_filter, ASSET_CATEGORIES['custom'])
+            full_label = f"{period_label} — {cat_info['icon']} {cat_info['name']} ({len(filtered_assets)} actifs)"
+        
         # Récupérer toutes les divergences
-        all_divergences = get_all_divergences(assets, period, config)
+        all_divergences = get_all_divergences(filtered_assets, period, config)
         
         if not all_divergences:
             return html.Div([
                 dbc.Alert([
                     html.Strong("Aucune divergence RSI détectée "),
-                    f"sur la période {period_label} pour les actifs: {', '.join(assets)}"
+                    f"sur la période {period_label} pour les actifs sélectionnés: ",
+                    html.Br(),
+                    html.Small(', '.join(filtered_assets), className="text-muted")
                 ], color="info"),
                 html.P([
                     "Cela peut signifier que le marché n'a pas présenté de conditions de retournement ",
@@ -132,10 +174,22 @@ def register_divergence_timeline_callbacks(app):
         stats = calculate_strategy_stats(all_divergences, holding_period)
         
         # Créer le graphique
-        fig = create_divergence_timeline_chart(all_divergences, period_label)
+        fig = create_divergence_timeline_chart(all_divergences, full_label)
         
         # Créer le contenu
         content = html.Div([
+            # Info sur le filtre
+            dbc.Alert([
+                html.Strong("📊 Analyse: "),
+                f"{len(filtered_assets)} actifs analysés",
+                html.Span(" | ", className="text-muted"),
+                f"Catégorie: ",
+                html.Strong(
+                    "Tous" if category_filter == 'all' 
+                    else f"{ASSET_CATEGORIES.get(category_filter, {}).get('icon', '')} {ASSET_CATEGORIES.get(category_filter, {}).get('name', category_filter)}"
+                ),
+            ], color="dark", className="mb-3 py-2"),
+            
             # Résumé des stats
             create_stats_summary(stats),
             
@@ -158,6 +212,15 @@ def register_divergence_timeline_callbacks(app):
                 figure=fig,
                 config={'displayModeBar': True, 'scrollZoom': True}
             ),
+            
+            # Liste des actifs analysés
+            html.Div([
+                html.Hr(),
+                html.Small([
+                    html.Strong("Actifs analysés: "),
+                    ', '.join(filtered_assets)
+                ], className="text-muted")
+            ], className="mt-3"),
             
             # Légende détaillée
             html.Div([

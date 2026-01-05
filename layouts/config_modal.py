@@ -1,12 +1,12 @@
 # layouts/config_modal.py
 """
 Modal de configuration des paramètres.
-VERSION 2.2 - CORRECTION des limites min pour permettre 0 et valeurs décimales basses
+VERSION 3.1 - Ajout du bouton de réinitialisation des actifs
 """
 from dash import dcc, html
 import dash_bootstrap_components as dbc
 
-from config import SIGNAL_TIMEFRAME, TRADING_PROFILES, get_default_config
+from config import SIGNAL_TIMEFRAME, ASSET_CATEGORIES, get_default_config
 
 
 def create_config_modal():
@@ -14,37 +14,85 @@ def create_config_modal():
     default_config = get_default_config()
     comb_weights = default_config.get('combination_weights', {})
     
-    # Créer les options pour le sélecteur de profil
-    profile_options = [
-        {'label': f"{profile['name']} - {profile['description']}", 'value': key}
-        for key, profile in TRADING_PROFILES.items()
+    # Créer les options pour le sélecteur de catégorie
+    category_options = [
+        {'label': f"{cat['icon']} {cat['name']}", 'value': key}
+        for key, cat in ASSET_CATEGORIES.items()
     ]
+    
+    # Créer les cartes de description des catégories
+    categories_list = list(ASSET_CATEGORIES.items())
+    half = (len(categories_list) + 1) // 2
+    first_half = categories_list[:half]
+    second_half = categories_list[half:]
     
     return dbc.Modal([
         dbc.ModalHeader(dbc.ModalTitle("⚙️ Configuration des Paramètres"), close_button=True),
         dbc.ModalBody([
             dbc.Accordion([
-                # === PROFIL DE TRADING ===
+                # === CATÉGORIE D'ASSET ===
                 dbc.AccordionItem([
-                    html.P("Sélectionnez un profil prédéfini qui ajuste automatiquement tous les paramètres.", className="text-muted mb-3"),
+                    html.P([
+                        "La catégorie détermine les poids optimaux pour cet actif. ",
+                        html.Strong("Chaque type d'actif se comporte différemment."),
+                    ], className="text-muted mb-3"),
+                    
                     dbc.Row([
                         dbc.Col([
-                            html.Label("Profil de Trading :"),
+                            html.Label("Catégorie de l'actif sélectionné :"),
                             dcc.Dropdown(
-                                id='config-trading-profile',
-                                options=profile_options,
-                                value='balanced',
+                                id='category-dropdown',
+                                options=category_options,
+                                value='custom',
                                 clearable=False
                             ),
-                        ], width=12),
+                        ], width=6),
+                        dbc.Col([
+                            html.Br(),
+                            dbc.Button("💾 Appliquer cette catégorie", id="update-category-btn", color="success", size="sm"),
+                        ], width=6, className="d-flex align-items-end"),
                     ]),
+                    
                     html.Hr(),
-                    html.Div(id='profile-description', className="mt-2"),
-                    html.Div([
-                        html.H6("Caractéristiques du profil sélectionné :", className="mt-3"),
-                        html.Div(id='profile-details', className="small text-muted")
+                    
+                    # Description des catégories - Première moitié
+                    html.H6("📋 Catégories disponibles :", className="mt-3"),
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Card([
+                                dbc.CardBody([
+                                    html.H6([
+                                        html.Span(cat['icon'], className="me-2"),
+                                        cat['name']
+                                    ], style={'color': cat['color']}, className="mb-1"),
+                                    html.Small(cat['description'], className="text-muted"),
+                                ], className="p-2")
+                            ], className="mb-2", style={'borderLeft': f"4px solid {cat['color']}"})
+                        ], width=6)
+                        for key, cat in first_half
+                    ], className="mb-2"),
+                    
+                    # Description des catégories - Deuxième moitié
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Card([
+                                dbc.CardBody([
+                                    html.H6([
+                                        html.Span(cat['icon'], className="me-2"),
+                                        cat['name']
+                                    ], style={'color': cat['color']}, className="mb-1"),
+                                    html.Small(cat['description'], className="text-muted"),
+                                ], className="p-2")
+                            ], className="mb-2", style={'borderLeft': f"4px solid {cat['color']}"})
+                        ], width=6)
+                        for key, cat in second_half
                     ]),
-                ], title="🎯 Profil de Trading", className="bg-primary"),
+                    
+                    # Impact sur les poids (sera rempli par callback)
+                    html.Hr(),
+                    html.Div(id='category-impact-preview', className="mt-2"),
+                    
+                ], title="🏷️ Catégorie d'Asset"),
                 
                 # === GESTION DES ACTIFS ===
                 dbc.AccordionItem([
@@ -55,13 +103,17 @@ def create_config_modal():
                                 dbc.Input(id='new-asset-input', placeholder='Ex: NVDA, AMZN, GC=F...', type='text'),
                                 dbc.Button("➕ Ajouter", id='add-asset-btn', color='success', size='sm'),
                             ]),
-                        ], width=6),
+                        ], width=5),
                         dbc.Col([
                             dbc.InputGroup([
                                 dcc.Dropdown(id='remove-asset-dropdown', placeholder='Sélectionner...', style={'minWidth': '150px'}),
                                 dbc.Button("🗑️ Supprimer", id='remove-asset-btn', color='danger', size='sm'),
                             ]),
-                        ], width=6),
+                        ], width=5),
+                        dbc.Col([
+                            dbc.Button("🔄 Défaut", id='reset-assets-btn', color='warning', size='sm', 
+                                      title="Réinitialiser la liste aux actifs par défaut"),
+                        ], width=2, className="d-flex align-items-center justify-content-center"),
                     ]),
                     html.Div(id='asset-management-status', className='mt-2'),
                     html.Hr(),
@@ -441,19 +493,17 @@ def create_config_modal():
                     ]),
                 ], title="💪 ADX (Force de Tendance)"),
                 
-                # === SEUILS DE DÉCISION - CORRIGÉ ===
+                # === SEUILS DE DÉCISION ===
                 dbc.AccordionItem([
                     dbc.Row([
                         dbc.Col([
                             html.Label("Seuil Conviction Minimum :"),
-                            # CORRECTION: min=0 au lieu de min=1, step=0.1 pour les décimales
                             dbc.Input(id='config-decision-threshold', type='number', 
                                      value=default_config['decision']['min_conviction_threshold'], 
                                      min=0, max=10, step=0.1),
                         ], width=4),
                         dbc.Col([
                             html.Label("Écart Min Achat/Vente :"),
-                            # CORRECTION: min=0 pour permettre 0
                             dbc.Input(id='config-decision-difference', type='number', 
                                      value=default_config['decision']['conviction_difference'], 
                                      min=0, max=5, step=0.1),
@@ -468,7 +518,6 @@ def create_config_modal():
                     dbc.Row([
                         dbc.Col([
                             html.Label("Niveau ADX pour Bonus :"),
-                            # CORRECTION: min=0 pour permettre 0
                             dbc.Input(id='config-decision-adx-level', type='number', 
                                      value=default_config['decision']['adx_confirmation_level'], 
                                      min=0, max=50, step=1),
@@ -481,7 +530,6 @@ def create_config_modal():
                         ], width=4),
                         dbc.Col([
                             html.Label("Min. Combos pour Signal :"),
-                            # CORRECTION: min=0 pour permettre 0
                             dbc.Input(id='config-decision-min-combos', type='number', 
                                      value=default_config['decision'].get('min_combinations_for_signal', 1), 
                                      min=0, max=5, step=1),

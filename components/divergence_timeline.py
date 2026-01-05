@@ -1,6 +1,7 @@
 # components/divergence_timeline.py
 """
 Graphique timeline des divergences RSI pour tous les actifs.
+VERSION 2.0 - Filtre par catégorie d'actifs
 """
 import plotly.graph_objects as go
 from dash import dcc, html
@@ -10,22 +11,21 @@ import numpy as np
 from datetime import datetime, timedelta
 import hashlib
 
+from config import ASSET_CATEGORIES, load_user_assets_with_categories
+
 
 def generate_color_for_asset(ticker):
     """
     Génère une couleur unique et cohérente pour un asset basée sur son ticker.
     La même couleur sera toujours générée pour le même ticker.
     """
-    # Utiliser un hash du ticker pour générer des valeurs RGB cohérentes
     hash_obj = hashlib.md5(ticker.encode())
     hash_hex = hash_obj.hexdigest()
     
-    # Extraire des valeurs pour H, S, L (utiliser HSL pour des couleurs plus vives)
-    h = int(hash_hex[:2], 16) / 255 * 360  # Hue: 0-360
-    s = 0.6 + (int(hash_hex[2:4], 16) / 255) * 0.3  # Saturation: 60-90%
-    l = 0.45 + (int(hash_hex[4:6], 16) / 255) * 0.15  # Lightness: 45-60%
+    h = int(hash_hex[:2], 16) / 255 * 360
+    s = 0.6 + (int(hash_hex[2:4], 16) / 255) * 0.3
+    l = 0.45 + (int(hash_hex[4:6], 16) / 255) * 0.15
     
-    # Convertir HSL en RGB
     def hsl_to_rgb(h, s, l):
         h = h / 360
         if s == 0:
@@ -54,13 +54,6 @@ def generate_color_for_asset(ticker):
 def calculate_strategy_stats(all_divergences, holding_period=11):
     """
     Calcule les statistiques de la stratégie basée sur les divergences.
-    
-    Args:
-        all_divergences: Liste de dict avec 'date', 'ticker', 'type'
-        holding_period: Nombre de jours de détention (défaut 11: achat J, vente J+10)
-    
-    Returns:
-        dict avec les statistiques
     """
     if not all_divergences:
         return {
@@ -73,7 +66,6 @@ def calculate_strategy_stats(all_divergences, holding_period=11):
             'signals_by_ticker': {}
         }
     
-    # Convertir en DataFrame pour faciliter l'analyse
     df = pd.DataFrame(all_divergences)
     df['date'] = pd.to_datetime(df['date'])
     df = df.sort_values('date')
@@ -83,7 +75,6 @@ def calculate_strategy_stats(all_divergences, holding_period=11):
     buy_signals = len(df[df['type'] == 'bullish'])
     sell_signals = len(df[df['type'] == 'bearish'])
     
-    # Calculer les signaux "actionnables" (espacés d'au moins holding_period jours)
     actionable_signals = 0
     missed_signals = 0
     last_action_date = None
@@ -102,7 +93,6 @@ def calculate_strategy_stats(all_divergences, holding_period=11):
             else:
                 missed_signals += 1
     
-    # Signaux par ticker
     signals_by_ticker = df.groupby('ticker').agg({
         'type': 'count',
     }).rename(columns={'type': 'count'}).to_dict()['count']
@@ -122,16 +112,8 @@ def calculate_strategy_stats(all_divergences, holding_period=11):
 def create_divergence_timeline_chart(divergence_data, period_label=""):
     """
     Crée le graphique timeline des divergences RSI.
-    
-    Args:
-        divergence_data: Liste de dict avec 'date', 'ticker', 'type', 'price'
-        period_label: Label de la période pour le titre
-    
-    Returns:
-        plotly Figure
     """
     if not divergence_data:
-        # Retourner un graphique vide avec message
         fig = go.Figure()
         fig.add_annotation(
             x=0.5, y=0.5,
@@ -150,25 +132,19 @@ def create_divergence_timeline_chart(divergence_data, period_label=""):
     
     fig = go.Figure()
     
-    # Organiser les données par ticker
     df = pd.DataFrame(divergence_data)
     df['date'] = pd.to_datetime(df['date'])
     
     tickers = df['ticker'].unique()
-    
-    # Générer les couleurs pour chaque ticker
     ticker_colors = {ticker: generate_color_for_asset(ticker) for ticker in tickers}
     
-    # Créer une trace par ticker
     for ticker in tickers:
         ticker_data = df[df['ticker'] == ticker]
         color = ticker_colors[ticker]
         
-        # Séparer les signaux d'achat et de vente
         bullish = ticker_data[ticker_data['type'] == 'bullish']
         bearish = ticker_data[ticker_data['type'] == 'bearish']
         
-        # Barres d'achat (vers le haut)
         if not bullish.empty:
             fig.add_trace(go.Bar(
                 x=bullish['date'],
@@ -189,7 +165,6 @@ def create_divergence_timeline_chart(divergence_data, period_label=""):
                 legendgroup=ticker,
             ))
         
-        # Barres de vente (vers le bas)
         if not bearish.empty:
             fig.add_trace(go.Bar(
                 x=bearish['date'],
@@ -210,10 +185,8 @@ def create_divergence_timeline_chart(divergence_data, period_label=""):
                 legendgroup=ticker,
             ))
     
-    # Ligne de référence à 0
     fig.add_hline(y=0, line_dash="solid", line_color="white", opacity=0.5)
     
-    # Annotations
     fig.add_annotation(
         x=0.02, y=0.95, xref="paper", yref="paper",
         text="↑ ACHAT (Div. Haussière)",
@@ -329,7 +302,6 @@ def create_stats_summary(stats):
             ], width=2),
         ], className="mb-3"),
         
-        # Détail par ticker
         html.Div([
             html.Small("Signaux par actif: ", className="text-muted me-2"),
             *[
@@ -342,6 +314,28 @@ def create_stats_summary(stats):
             ]
         ], className="mb-2")
     ])
+
+
+def get_category_filter_options():
+    """Retourne les options pour le filtre de catégorie."""
+    options = [{'label': '🌐 Tous les actifs', 'value': 'all'}]
+    
+    # Ajouter chaque catégorie
+    for key, cat in ASSET_CATEGORIES.items():
+        if key != 'custom':  # On peut inclure ou exclure 'custom'
+            options.append({
+                'label': f"{cat['icon']} {cat['name']}",
+                'value': key
+            })
+    
+    # Ajouter custom à la fin
+    if 'custom' in ASSET_CATEGORIES:
+        options.append({
+            'label': f"{ASSET_CATEGORIES['custom']['icon']} {ASSET_CATEGORIES['custom']['name']}",
+            'value': 'custom'
+        })
+    
+    return options
 
 
 def create_divergence_timeline_section():
@@ -360,6 +354,19 @@ def create_divergence_timeline_section():
                     ),
                 ], width="auto"),
                 dbc.Col([
+                    # Sélecteur de catégorie
+                    html.Span([
+                        html.Small("Catégorie: ", className="text-muted me-1"),
+                        dcc.Dropdown(
+                            id="timeline-category-filter",
+                            options=get_category_filter_options(),
+                            value='all',
+                            clearable=False,
+                            style={'width': '200px', 'display': 'inline-block'},
+                            className="me-3"
+                        ),
+                    ], className="d-inline-flex align-items-center me-3"),
+                    
                     dbc.Button(
                         "🔍 Calculer",
                         id="calculate-divergence-timeline-btn",
@@ -393,11 +400,11 @@ def create_divergence_timeline_section():
                             html.P([
                                 "Cliquez sur ",
                                 html.Strong("'Calculer'"),
-                                " pour analyser les divergences RSI de tous les actifs sur la période sélectionnée. ",
+                                " pour analyser les divergences RSI des actifs sur la période sélectionnée. ",
                                 html.Br(),
                                 html.Small([
-                                    "💡 Ce graphique montre quand vous auriez pu appliquer votre stratégie. ",
-                                    "Les signaux 'Actionnables' sont espacés d'au moins N jours (période de détention)."
+                                    "💡 Utilisez le filtre 'Catégorie' pour analyser un type d'actif spécifique ",
+                                    "(Forex EUR, Crypto, etc.) ou tous les actifs."
                                 ], className="text-muted")
                             ], className="text-muted")
                         ]

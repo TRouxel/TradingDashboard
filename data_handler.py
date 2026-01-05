@@ -1,8 +1,8 @@
-# data_handler.py
+# data_handler.py - VERSION MISE À JOUR
 import yfinance as yf
 import pandas as pd
 from indicator_calculator import calculate_all_indicators
-from config import get_default_config
+from config import get_default_config, get_category_config, get_asset_category, detect_asset_category
 
 MIN_PERIOD_FOR_INDICATORS = "2y"
 
@@ -18,7 +18,6 @@ def get_asset_id(ticker):
         data = cursor.fetchone()
         
         if data is None:
-            # L'actif n'existe pas, on le crée
             try:
                 info = yf.Ticker(ticker).info
                 name = info.get('longName', ticker)
@@ -42,24 +41,14 @@ def get_asset_id(ticker):
         
     except Exception as e:
         print(f"Erreur lors de la récupération de l'asset_id pour {ticker}: {e}")
-        # Retourner un ID fictif basé sur le hash du ticker
         return hash(ticker) % 1000000
 
 
 def period_to_days(period_str):
     """Convertit une chaîne de période en nombre approximatif de jours."""
     mapping = {
-        '1mo': 30,
-        '3mo': 90,
-        '6mo': 180,
-        '1y': 365,
-        '2y': 730,
-        '5y': 1825,
-        '10y': 3650,
-        '15y': 5475,
-        '20y': 7300,
-        '25y': 9125,
-        'max': 15000  # ~40 ans max
+        '1mo': 30, '3mo': 90, '6mo': 180, '1y': 365, '2y': 730,
+        '5y': 1825, '10y': 3650, '15y': 5475, '20y': 7300, '25y': 9125, 'max': 15000
     }
     return mapping.get(period_str, 365)
 
@@ -84,31 +73,22 @@ def get_minimum_period(requested_period):
     else:
         return "max"
 
+
 def fetch_and_prepare_data(ticker, period="2y", return_full=False, config=None):
     """
     Récupère les données depuis Yahoo Finance, calcule les indicateurs, et retourne un DataFrame.
     
-    Args:
-        ticker: Le symbole de l'actif
-        period: La période d'affichage souhaitée
-        return_full: Si True, retourne toutes les données
-        config: Configuration des paramètres (optionnel)
+    NOUVEAU: Si config est None, utilise la config adaptée à la catégorie de l'asset.
     """
+    # Récupérer la catégorie de l'asset et appliquer la config correspondante
     if config is None:
-        config = get_default_config()
-        print("⚠️ fetch_and_prepare_data: config=None, utilisation des défauts")
+        asset_category = get_asset_category(ticker)
+        config = get_category_config(asset_category)
+        print(f"📊 {ticker}: Catégorie '{asset_category}' détectée, config adaptée appliquée")
     else:
-        ind_cfg = config.get('individual_weights', {})
-        dec_cfg = config.get('decision', {})
-        print(f"\n{'='*60}")
-        print(f"📊 fetch_and_prepare_data pour {ticker}")
-        print(f"   >>> CONFIG REÇUE <<<")
-        print(f"   rsi_divergence = {ind_cfg.get('rsi_divergence')}")
-        print(f"   min_conviction_threshold = {dec_cfg.get('min_conviction_threshold')}")
-        print(f"   min_combinations_for_signal = {dec_cfg.get('min_combinations_for_signal')}")
-        print(f"{'='*60}\n")
+        asset_category = config.get('asset_category', 'custom')
     
-    print(f"📊 Téléchargement des données pour {ticker}...")
+    print(f"📊 Téléchargement des données pour {ticker} (catégorie: {asset_category})...")
     
     asset_id = get_asset_id(ticker)
     download_period = get_minimum_period(period)
@@ -131,25 +111,18 @@ def fetch_and_prepare_data(ticker, period="2y", return_full=False, config=None):
     df.columns = df.columns.str.lower()
     
     df.rename(columns={
-        'open': 'Open',
-        'high': 'High',
-        'low': 'Low',
-        'close': 'Close',
-        'volume': 'Volume'
+        'open': 'Open', 'high': 'High', 'low': 'Low', 'close': 'Close', 'volume': 'Volume'
     }, inplace=True)
 
-    # Calculer les indicateurs avec la config
+    # Calculer les indicateurs avec la config adaptée à la catégorie
     df_with_indicators = calculate_all_indicators(df.copy(), config=config)
     
     df_with_indicators.rename(columns={
-        'Open': 'open',
-        'High': 'high',
-        'Low': 'low',
-        'Close': 'close',
-        'Volume': 'volume'
+        'Open': 'open', 'High': 'high', 'Low': 'low', 'Close': 'close', 'Volume': 'volume'
     }, inplace=True)
     
     df_with_indicators['asset_id'] = asset_id
+    df_with_indicators['asset_category'] = asset_category  # Ajouter la catégorie
     df_with_indicators.reset_index(inplace=True)
     df_with_indicators['date'] = df_with_indicators['Date'].dt.strftime('%Y-%m-%d')
     
@@ -189,17 +162,11 @@ def save_indicators_to_db(df_today):
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (asset_id, date) 
                 DO UPDATE SET 
-                    open = EXCLUDED.open,
-                    high = EXCLUDED.high,
-                    low = EXCLUDED.low,
-                    close = EXCLUDED.close,
-                    volume = EXCLUDED.volume,
-                    stochastic_k = EXCLUDED.stochastic_k,
-                    stochastic_d = EXCLUDED.stochastic_d,
-                    rsi = EXCLUDED.rsi,
-                    pattern = EXCLUDED.pattern,
-                    recommendation = EXCLUDED.recommendation,
-                    conviction = EXCLUDED.conviction
+                    open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low,
+                    close = EXCLUDED.close, volume = EXCLUDED.volume,
+                    stochastic_k = EXCLUDED.stochastic_k, stochastic_d = EXCLUDED.stochastic_d,
+                    rsi = EXCLUDED.rsi, pattern = EXCLUDED.pattern,
+                    recommendation = EXCLUDED.recommendation, conviction = EXCLUDED.conviction
             ''', tuple(row))
         
         conn.commit()

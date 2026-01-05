@@ -1,11 +1,14 @@
 # callbacks/config_callbacks.py
 """
 Callbacks pour la gestion de la configuration.
-VERSION 2.3 - CORRECTION COMPLÈTE du passage de la config
+VERSION 3.0 - Catégories d'Assets au lieu des Profils de Trading
 """
 from dash import html, Input, Output, State, ctx
 import dash_bootstrap_components as dbc
-from config import get_default_config, get_profile_config, TRADING_PROFILES, INDIVIDUAL_WEIGHTS, COMBINATION_WEIGHTS
+from config import (
+    get_default_config, get_category_config, ASSET_CATEGORIES, 
+    INDIVIDUAL_WEIGHTS, COMBINATION_WEIGHTS, update_asset_category
+)
 
 
 def register_config_callbacks(app):
@@ -23,27 +26,70 @@ def register_config_callbacks(app):
         return not is_open
 
     @app.callback(
-        [Output('profile-description', 'children'),
-         Output('profile-details', 'children')],
-        [Input('config-trading-profile', 'value')],
+        Output('category-impact-preview', 'children'),
+        [Input('category-dropdown', 'value')],
         prevent_initial_call=True
     )
-    def update_profile_description(profile_name):
-        if not profile_name or profile_name not in TRADING_PROFILES:
-            return "", ""
+    def update_category_preview(category_key):
+        """Affiche un aperçu de l'impact de la catégorie sélectionnée."""
+        if not category_key or category_key not in ASSET_CATEGORIES:
+            return ""
         
-        profile = TRADING_PROFILES[profile_name]
+        category = ASSET_CATEGORIES[category_key]
         
-        description = html.P(profile['description'], className="text-info")
+        # Calculer les modifications
+        weight_mods = category.get('weight_modifiers', {})
+        decision_mods = category.get('decision_modifiers', {})
+        rsi_thresholds = category.get('rsi_thresholds', {})
         
-        details = html.Ul([
-            html.Li(f"Seuil de conviction: {profile['min_conviction_threshold']}"),
-            html.Li(f"Écart minimum: {profile['conviction_difference']}"),
-            html.Li(f"Bonus combinaisons: x{profile['combination_bonus']}"),
-            html.Li(f"Min. combinaisons pour signal: {profile['min_combinations_for_signal']}"),
-        ])
+        if not weight_mods and not decision_mods:
+            return html.P("Cette catégorie utilise les poids par défaut.", className="text-muted")
         
-        return description, details
+        content = []
+        
+        # Afficher les modifications de poids
+        if weight_mods:
+            weight_badges = []
+            for key, mult in weight_mods.items():
+                if mult > 1:
+                    color = "success"
+                    arrow = "↑"
+                elif mult < 1:
+                    color = "danger"
+                    arrow = "↓"
+                else:
+                    continue
+                
+                weight_badges.append(
+                    dbc.Badge(f"{arrow} {key}: x{mult:.1f}", color=color, className="me-1 mb-1")
+                )
+            
+            if weight_badges:
+                content.append(html.Div([
+                    html.Small("Poids modifiés: ", className="text-muted"),
+                    *weight_badges
+                ], className="mb-2"))
+        
+        # Afficher les modifications de décision
+        if decision_mods:
+            decision_items = []
+            for key, value in decision_mods.items():
+                decision_items.append(html.Li(f"{key}: {value}", className="small"))
+            
+            content.append(html.Div([
+                html.Small("Seuils de décision: ", className="text-muted"),
+                html.Ul(decision_items, className="mb-0 ps-3")
+            ], className="mb-2"))
+        
+        # Afficher les seuils RSI
+        if rsi_thresholds:
+            content.append(html.Div([
+                html.Small("Seuils RSI: ", className="text-muted"),
+                dbc.Badge(f"Survente: {rsi_thresholds.get('oversold', 30)}", color="success", className="me-1"),
+                dbc.Badge(f"Surachat: {rsi_thresholds.get('overbought', 70)}", color="danger"),
+            ]))
+        
+        return html.Div(content)
 
     @app.callback(
         [Output('config-store', 'data'),
@@ -52,8 +98,10 @@ def register_config_callbacks(app):
         [Input('config-apply-btn', 'n_clicks'),
          Input('config-reset-btn', 'n_clicks'),
          Input('signal-timeframe-quick', 'value'),
-         Input('config-trading-profile', 'value')],
-        [State('config-signal-timeframe', 'value'),
+         Input('update-category-btn', 'n_clicks')],
+        [State('category-dropdown', 'value'),
+         State('asset-dropdown', 'value'),
+         State('config-signal-timeframe', 'value'),
          # RSI
          State('config-rsi-period', 'value'),
          State('config-rsi-oversold', 'value'),
@@ -135,8 +183,8 @@ def register_config_callbacks(app):
          State('config-store', 'data')],
         prevent_initial_call=True
     )
-    def update_config(apply_clicks, reset_clicks, quick_timeframe, trading_profile,
-                      signal_tf,
+    def update_config(apply_clicks, reset_clicks, quick_timeframe, update_cat_clicks,
+                      category_key, selected_asset, signal_tf,
                       rsi_period, rsi_os, rsi_ob, rsi_exit_os_min, rsi_exit_os_max, rsi_exit_ob_min, rsi_exit_ob_max,
                       stoch_k, stoch_d, stoch_os, stoch_ob,
                       bb_period, bb_std,
@@ -165,32 +213,30 @@ def register_config_callbacks(app):
         
         triggered = ctx.triggered_id
         
-        print(f"\n{'='*60}")
-        print(f"🔧 update_config TRIGGERED by: {triggered}")
-        print(f"   dec_threshold reçu = {dec_threshold}")
-        print(f"   ind_divergence reçu = {ind_divergence}")
-        print(f"{'='*60}")
-        
         # Reset
         if triggered == 'config-reset-btn':
             config = get_default_config()
             summary = "🔄 Configuration réinitialisée"
             return config, summary, config['signal_timeframe']
         
-        # Changement de profil de trading
-        if triggered == 'config-trading-profile' and trading_profile:
-            config = get_profile_config(trading_profile)
-            summary = f"🎯 Profil '{TRADING_PROFILES[trading_profile]['name']}' appliqué"
+        # Appliquer une catégorie d'asset
+        if triggered == 'update-category-btn' and category_key and selected_asset:
+            # Mettre à jour la catégorie de l'asset dans la base
+            update_asset_category(selected_asset, category_key)
+            # Charger la config de cette catégorie
+            config = get_category_config(category_key)
+            cat_info = ASSET_CATEGORIES.get(category_key, ASSET_CATEGORIES['custom'])
+            summary = f"🏷️ Catégorie '{cat_info['name']}' appliquée à {selected_asset}"
             return config, summary, config['signal_timeframe']
         
-        # Changement rapide du timeframe - GARDER la config actuelle MAIS mettre à jour le timeframe
+        # Changement rapide du timeframe
         if triggered == 'signal-timeframe-quick':
             config = current_config.copy() if current_config else get_default_config()
             config['signal_timeframe'] = quick_timeframe
             summary = f"⏱️ Fenêtre: {quick_timeframe}j | Seuil: {config['decision']['min_conviction_threshold']}"
             return config, summary, quick_timeframe
         
-        # Application manuelle des paramètres (triggered == 'config-apply-btn')
+        # Application manuelle des paramètres
         config = build_config_from_inputs(
             signal_tf,
             rsi_period, rsi_os, rsi_ob, rsi_exit_os_min, rsi_exit_os_max, rsi_exit_ob_min, rsi_exit_ob_max,
@@ -227,14 +273,6 @@ def register_config_callbacks(app):
         # Compter les indicateurs individuels actifs
         ind_weights = config.get('individual_weights', {})
         active_inds = sum(1 for v in ind_weights.values() if v and v > 0)
-        
-        # DEBUG: Afficher les valeurs FINALES dans la config
-        print(f"\n🔧 CONFIG FINALE CONSTRUITE:")
-        print(f"   decision.min_conviction_threshold = {config['decision']['min_conviction_threshold']}")
-        print(f"   decision.conviction_difference = {config['decision']['conviction_difference']}")
-        print(f"   decision.min_combinations_for_signal = {config['decision']['min_combinations_for_signal']}")
-        print(f"   individual_weights.rsi_divergence = {config['individual_weights']['rsi_divergence']}")
-        print(f"   Active combos: {active_combos}, Active inds: {active_inds}")
         
         summary = f"✅ Config | ⏱️ {config['signal_timeframe']}j | Seuil: {config['decision']['min_conviction_threshold']} | Combos: {active_combos}/26 | Inds: {active_inds}"
         
@@ -306,37 +344,15 @@ def build_config_from_inputs(
     div_lookback, div_rsi_low, div_rsi_high,
     current_config
 ):
-    """
-    Construit la configuration à partir des inputs du formulaire.
-    VERSION CORRIGÉE: Utilise DIRECTEMENT les valeurs des inputs.
-    """
+    """Construit la configuration à partir des inputs du formulaire."""
     default = get_default_config()
     
-    # Fonction pour récupérer une valeur - utilise la valeur par défaut SEULEMENT si None
     def val(v, default_val):
-        """Retourne v si v n'est pas None, sinon default_val.
-        IMPORTANT: 0 est une valeur valide, ne pas la traiter comme None!
-        """
+        """Retourne v si v n'est pas None, sinon default_val."""
         if v is None:
-            print(f"   [val] v=None, using default={default_val}")
             return default_val
-        print(f"   [val] v={v} (type={type(v).__name__}), returning as-is")
         return v
     
-    # DEBUG
-    print(f"\n   build_config_from_inputs INPUTS:")
-    print(f"      dec_threshold = {dec_threshold} (type: {type(dec_threshold)})")
-    print(f"      dec_diff = {dec_diff}")
-    print(f"      dec_min_combos = {dec_min_combos}")
-    print(f"      ind_divergence = {ind_divergence}")
-    
-    # DEBUG: Afficher les valeurs BRUTES reçues
-    print(f"\n   RAW INPUTS:")
-    print(f"      dec_threshold RAW = {dec_threshold} (type: {type(dec_threshold)})")
-    print(f"      dec_diff RAW = {dec_diff}")
-    print(f"      dec_min_combos RAW = {dec_min_combos}")
-    
-    # IMPORTANT: Utiliser directement les valeurs reçues, pas les valeurs par défaut
     config = {
         'signal_timeframe': val(signal_tf, 1),
         'rsi': {
@@ -378,72 +394,68 @@ def build_config_from_inputs(
             'strong': val(adx_strong, 25),
             'very_strong': val(adx_very_strong, 40),
         },
-        # === COMBINAISONS ===
         'combination_weights': {
             # Combinaisons d'achat (13)
-            'divergence_bullish_stoch': val(comb_divergence_bullish_stoch, 0),
-            'triple_confirm_buy': val(comb_triple_confirm_buy, 0),
-            'macd_cross_rsi_low': val(comb_macd_cross_rsi_low, 0),
-            'bollinger_low_rsi_low': val(comb_bollinger_low_rsi_low, 0),
-            'rsi_low_stoch_bullish': val(comb_rsi_low_stoch_bullish, 0),
-            'pattern_bullish_rsi_low': val(comb_pattern_bullish_rsi_low, 0),
-            'bollinger_low_stoch_bullish': val(comb_bollinger_low_stoch_bullish, 0),
-            'adx_strong_di_plus': val(comb_adx_strong_di_plus, 0),
-            'macd_bullish_trend_bullish': val(comb_macd_bullish_trend_bullish, 0),
-            'macd_positive_trend_bullish': val(comb_macd_positive_trend_bullish, 0),
-            'pattern_bullish_trend_bullish': val(comb_pattern_bullish_trend_bullish, 0),
-            'stoch_cross_bullish_rsi_low': val(comb_stoch_cross_bullish_rsi_low, 0),
-            'rsi_exit_oversold_stoch': val(comb_rsi_exit_oversold_stoch, 0),
+            'divergence_bullish_stoch': val(comb_divergence_bullish_stoch, 3.0),
+            'triple_confirm_buy': val(comb_triple_confirm_buy, 2.8),
+            'macd_cross_rsi_low': val(comb_macd_cross_rsi_low, 2.5),
+            'bollinger_low_rsi_low': val(comb_bollinger_low_rsi_low, 2.3),
+            'rsi_low_stoch_bullish': val(comb_rsi_low_stoch_bullish, 2.2),
+            'pattern_bullish_rsi_low': val(comb_pattern_bullish_rsi_low, 2.2),
+            'bollinger_low_stoch_bullish': val(comb_bollinger_low_stoch_bullish, 2.0),
+            'adx_strong_di_plus': val(comb_adx_strong_di_plus, 1.8),
+            'macd_bullish_trend_bullish': val(comb_macd_bullish_trend_bullish, 1.8),
+            'macd_positive_trend_bullish': val(comb_macd_positive_trend_bullish, 1.7),
+            'pattern_bullish_trend_bullish': val(comb_pattern_bullish_trend_bullish, 1.6),
+            'stoch_cross_bullish_rsi_low': val(comb_stoch_cross_bullish_rsi_low, 1.6),
+            'rsi_exit_oversold_stoch': val(comb_rsi_exit_oversold_stoch, 1.5),
             # Combinaisons de vente (13)
-            'divergence_bearish_stoch': val(comb_divergence_bearish_stoch, 0),
-            'triple_confirm_sell': val(comb_triple_confirm_sell, 0),
-            'macd_cross_bearish_rsi_high': val(comb_macd_cross_bearish_rsi_high, 0),
-            'bollinger_high_rsi_high': val(comb_bollinger_high_rsi_high, 0),
-            'rsi_high_stoch_bearish': val(comb_rsi_high_stoch_bearish, 0),
-            'pattern_bearish_rsi_high': val(comb_pattern_bearish_rsi_high, 0),
-            'bollinger_high_stoch_bearish': val(comb_bollinger_high_stoch_bearish, 0),
-            'adx_strong_di_minus': val(comb_adx_strong_di_minus, 0),
-            'macd_bearish_trend_bearish': val(comb_macd_bearish_trend_bearish, 0),
-            'macd_negative_trend_bearish': val(comb_macd_negative_trend_bearish, 0),
-            'pattern_bearish_trend_bearish': val(comb_pattern_bearish_trend_bearish, 0),
-            'stoch_cross_bearish_rsi_high': val(comb_stoch_cross_bearish_rsi_high, 0),
-            'rsi_exit_overbought_stoch': val(comb_rsi_exit_overbought_stoch, 0),
-            'price_below_mas_macd_negative': val(comb_price_below_mas_macd_negative, 0),
+            'divergence_bearish_stoch': val(comb_divergence_bearish_stoch, 3.0),
+            'triple_confirm_sell': val(comb_triple_confirm_sell, 2.8),
+            'macd_cross_bearish_rsi_high': val(comb_macd_cross_bearish_rsi_high, 2.5),
+            'bollinger_high_rsi_high': val(comb_bollinger_high_rsi_high, 2.3),
+            'rsi_high_stoch_bearish': val(comb_rsi_high_stoch_bearish, 2.2),
+            'pattern_bearish_rsi_high': val(comb_pattern_bearish_rsi_high, 2.2),
+            'bollinger_high_stoch_bearish': val(comb_bollinger_high_stoch_bearish, 2.0),
+            'adx_strong_di_minus': val(comb_adx_strong_di_minus, 1.8),
+            'macd_bearish_trend_bearish': val(comb_macd_bearish_trend_bearish, 1.8),
+            'macd_negative_trend_bearish': val(comb_macd_negative_trend_bearish, 1.7),
+            'pattern_bearish_trend_bearish': val(comb_pattern_bearish_trend_bearish, 1.6),
+            'stoch_cross_bearish_rsi_high': val(comb_stoch_cross_bearish_rsi_high, 1.6),
+            'rsi_exit_overbought_stoch': val(comb_rsi_exit_overbought_stoch, 1.5),
+            'price_below_mas_macd_negative': val(comb_price_below_mas_macd_negative, 1.5),
         },
-        # === INDICATEURS INDIVIDUELS ===
         'individual_weights': {
-            'rsi_divergence': val(ind_divergence, 0),
-            'trend_strong': val(ind_trend_strong, 0),
-            'trend_weak': val(ind_trend_weak, 0),
-            'pattern_signal': val(ind_pattern, 0),
-            'rsi_extreme': val(ind_rsi_extreme, 0),
-            'rsi_exit_zone': 0,
-            'stoch_cross': val(ind_stoch, 0),
-            'stoch_extreme': 0,
-            'macd_cross': val(ind_macd, 0),
-            'macd_histogram': val(ind_macd, 0) * 0.5 if ind_macd else 0,
-            'bollinger_touch': val(ind_bollinger, 0),
-            'bollinger_zone': val(ind_bollinger, 0) * 0.6 if ind_bollinger else 0,
-            'adx_direction': 0,
+            'rsi_divergence': val(ind_divergence, 2.0),
+            'trend_strong': val(ind_trend_strong, 1.5),
+            'trend_weak': val(ind_trend_weak, 0.8),
+            'pattern_signal': val(ind_pattern, 0.8),
+            'rsi_extreme': val(ind_rsi_extreme, 0.8),
+            'rsi_exit_zone': 0.5,
+            'stoch_cross': val(ind_stoch, 0.5),
+            'stoch_extreme': 0.3,
+            'macd_cross': val(ind_macd, 0.6),
+            'macd_histogram': val(ind_macd, 0.6) * 0.5 if ind_macd else 0.3,
+            'bollinger_touch': val(ind_bollinger, 0.5),
+            'bollinger_zone': val(ind_bollinger, 0.5) * 0.6 if ind_bollinger else 0.3,
+            'adx_direction': 0.5,
         },
-        # Ancien format pour compatibilité
         'signal_weights': {
-            'rsi_exit_oversold': val(ind_divergence, 0),
-            'rsi_exit_overbought': val(ind_divergence, 0),
-            'stoch_bullish_cross': val(ind_stoch, 0),
-            'stoch_bearish_cross': val(ind_stoch, 0),
-            'macd_bullish': val(ind_macd, 0),
-            'macd_bearish': val(ind_macd, 0),
-            'macd_histogram_positive': 0,
-            'macd_histogram_negative': 0,
-            'rsi_divergence': val(ind_divergence, 0),
-            'pattern_bullish': val(ind_pattern, 0),
-            'pattern_bearish': val(ind_pattern, 0),
-            'trend_bonus': val(ind_trend_strong, 0),
-            'bollinger_lower': val(ind_bollinger, 0),
-            'bollinger_upper': val(ind_bollinger, 0),
+            'rsi_exit_oversold': val(ind_divergence, 2.0),
+            'rsi_exit_overbought': val(ind_divergence, 2.0),
+            'stoch_bullish_cross': val(ind_stoch, 0.5),
+            'stoch_bearish_cross': val(ind_stoch, 0.5),
+            'macd_bullish': val(ind_macd, 0.6),
+            'macd_bearish': val(ind_macd, 0.6),
+            'macd_histogram_positive': 0.3,
+            'macd_histogram_negative': 0.3,
+            'rsi_divergence': val(ind_divergence, 2.0),
+            'pattern_bullish': val(ind_pattern, 0.8),
+            'pattern_bearish': val(ind_pattern, 0.8),
+            'trend_bonus': val(ind_trend_strong, 1.5),
+            'bollinger_lower': val(ind_bollinger, 0.5),
+            'bollinger_upper': val(ind_bollinger, 0.5),
         },
-        # === DÉCISION - C'EST ICI LE PROBLÈME ===
         'decision': {
             'min_conviction_threshold': val(dec_threshold, 2.5),
             'conviction_difference': val(dec_diff, 0.5),
@@ -462,12 +474,7 @@ def build_config_from_inputs(
             'rsi_high_threshold': val(div_rsi_high, 60),
         },
         'optional_filters': current_config.get('optional_filters', default['optional_filters']) if current_config else default['optional_filters'],
-        'trading_profile': 'custom',
+        'asset_category': 'custom',
     }
-    
-    # DEBUG FINAL
-    print(f"\n   build_config_from_inputs OUTPUT:")
-    print(f"      config['decision']['min_conviction_threshold'] = {config['decision']['min_conviction_threshold']}")
-    print(f"      config['individual_weights']['rsi_divergence'] = {config['individual_weights']['rsi_divergence']}")
     
     return config
