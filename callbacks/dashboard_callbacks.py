@@ -229,14 +229,31 @@ def register_dashboard_callbacks(app):
         return dbc.Alert(f"✅ Indicateurs sauvegardés pour {selected_asset} le {selected_date_str}", 
                         color="success", duration=4000, dismissable=True)
 
-
 def create_technical_header(last_row, selected_asset):
-    """Crée le header avec les badges de recommandation."""
+    """Crée le header avec les badges de recommandation et le prix avec bonne devise."""
+    from config import get_asset_currency, get_currency_symbol
+    
     recommendation = last_row.get('recommendation', 'Neutre')
     conviction = last_row.get('conviction', 0)
     trend = last_row.get('trend', 'neutral')
     close_price = last_row.get('close', 0)
     bb_signal = last_row.get('bb_signal', 'neutral')
+    
+    # Récupérer la devise et son symbole
+    currency = get_asset_currency(selected_asset)
+    currency_symbol = get_currency_symbol(currency)
+    
+    # Formater le prix selon la devise
+    if currency in ['JPY', 'KRW']:
+        price_display = f"{currency_symbol}{close_price:,.0f}"
+    elif close_price < 0.01:
+        price_display = f"{currency_symbol}{close_price:.6f}"
+    elif close_price < 1:
+        price_display = f"{currency_symbol}{close_price:.4f}"
+    elif close_price > 10000:
+        price_display = f"{currency_symbol}{close_price:,.0f}"
+    else:
+        price_display = f"{currency_symbol}{close_price:.2f}"
     
     date_val = last_row.get('date', last_row.get('Date', ''))
     if isinstance(date_val, pd.Timestamp):
@@ -274,14 +291,13 @@ def create_technical_header(last_row, selected_asset):
     
     return [
         html.Span(f"{selected_asset}", className="fs-5 fw-bold me-3"),
-        html.Span(f"${close_price:.2f}", className="me-3"),
+        html.Span(price_display, className="me-3"),
         reco_badge,
         conviction_badge,
         trend_badge,
         bb_badge,
         html.Span(f"({date_str})", className="text-muted small"),
     ]
-
 
 def create_main_charts_with_zoom(df_graph, selected_date, selected_asset, display_options, config, x_range=None):
     """Crée les graphiques principaux avec zoom synchronisé."""

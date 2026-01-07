@@ -1,19 +1,144 @@
 # components/summary_table.py
 """
 Tableau récapitulatif des divergences RSI pour tous les actifs.
-VERSION 2.0 - Sous-sections par catégorie d'actifs
+VERSION 3.1 - Correction affichage colonne Nom + devises métaux
 """
 from dash import html, dcc
 import dash_bootstrap_components as dbc
 import pandas as pd
 from datetime import datetime, timedelta
 
-from config import ASSET_CATEGORIES, get_asset_category, load_user_assets_with_categories
+from config import (
+    ASSET_CATEGORIES, get_asset_category, load_user_assets_with_categories,
+    get_asset_name, get_asset_currency, get_currency_symbol, ASSET_NAMES
+)
+
+
+def format_price_with_currency(price, ticker):
+    """Formate un prix avec le bon symbole de devise."""
+    if price is None or price == 0:
+        return "N/A"
+    
+    currency = get_asset_currency(ticker)
+    symbol = get_currency_symbol(currency)
+    
+    # Format selon la devise
+    if currency == 'JPY' or currency == 'KRW':
+        # Pas de décimales pour le Yen et le Won
+        return f"{symbol}{price:.0f}"
+    elif price < 0.01:
+        # Très petits prix (certaines crypto)
+        return f"{symbol}{price:.6f}"
+    elif price < 1:
+        return f"{symbol}{price:.4f}"
+    elif price > 10000:
+        return f"{symbol}{price:,.0f}"
+    else:
+        return f"{symbol}{price:.2f}"
+
+
+def get_display_name(ticker):
+    """
+    Récupère le nom d'affichage d'un actif.
+    Essaie d'abord ASSET_NAMES, puis tente de récupérer via yfinance en cache.
+    """
+    # D'abord essayer le dictionnaire local
+    name = get_asset_name(ticker)
+    
+    # Si le nom est juste le ticker, essayer d'obtenir un meilleur nom
+    if name == ticker or name == ticker.upper():
+        # Pour les cryptos, extraire le nom de base
+        if '-EUR' in ticker or '-USD' in ticker:
+            base = ticker.split('-')[0]
+            crypto_names = {
+                'BTC': 'Bitcoin',
+                'ETH': 'Ethereum',
+                'SOL': 'Solana',
+                'XRP': 'Ripple',
+                'ADA': 'Cardano',
+                'DOGE': 'Dogecoin',
+                'DOT': 'Polkadot',
+                'LINK': 'Chainlink',
+                'AVAX': 'Avalanche',
+                'MATIC': 'Polygon',
+                'UNI': 'Uniswap',
+                'LTC': 'Litecoin',
+                'BCH': 'Bitcoin Cash',
+                'ATOM': 'Cosmos',
+                'NEAR': 'Near Protocol',
+                'FTM': 'Fantom',
+                'ALGO': 'Algorand',
+                'XLM': 'Stellar',
+                'AAVE': 'Aave',
+                'MKR': 'Maker',
+                'CRV': 'Curve',
+                'SHIB': 'Shiba Inu',
+                'PEPE': 'Pepe',
+            }
+            if base in crypto_names:
+                return crypto_names[base]
+        
+        # Pour les forex, extraire les devises
+        if '=X' in ticker:
+            pair = ticker.replace('=X', '')
+            if len(pair) == 6:
+                base_currency = pair[:3]
+                currency_names = {
+                    'USD': 'Dollar US',
+                    'EUR': 'Euro',
+                    'GBP': 'Livre Sterling',
+                    'JPY': 'Yen',
+                    'CHF': 'Franc Suisse',
+                    'AUD': 'Dollar Australien',
+                    'CAD': 'Dollar Canadien',
+                    'NZD': 'Dollar NZ',
+                    'SEK': 'Couronne Suédoise',
+                    'NOK': 'Couronne Norvégienne',
+                    'DKK': 'Couronne Danoise',
+                    'SGD': 'Dollar Singapour',
+                    'HKD': 'Dollar HK',
+                    'PLN': 'Zloty',
+                    'CZK': 'Couronne Tchèque',
+                    'HUF': 'Forint',
+                    'TRY': 'Lire Turque',
+                    'ZAR': 'Rand',
+                    'MXN': 'Peso Mexicain',
+                    'CNY': 'Yuan',
+                    'INR': 'Roupie',
+                    'KRW': 'Won',
+                }
+                if base_currency in currency_names:
+                    return currency_names[base_currency]
+        
+        # Pour les indices
+        if ticker.startswith('^'):
+            index_names = {
+                '^GSPC': 'S&P 500',
+                '^DJI': 'Dow Jones',
+                '^IXIC': 'NASDAQ',
+                '^NDX': 'NASDAQ 100',
+                '^GDAXI': 'DAX',
+                '^FCHI': 'CAC 40',
+                '^FTSE': 'FTSE 100',
+                '^STOXX50E': 'Euro Stoxx 50',
+            }
+            if ticker in index_names:
+                return index_names[ticker]
+    
+    return name
 
 
 def create_asset_row(asset_data, is_loaded=True):
     """Crée une ligne de tableau pour un actif."""
     ticker = asset_data.get('ticker', 'N/A')
+    
+    # Récupérer le nom de l'actif avec la fonction améliorée
+    asset_name = get_display_name(ticker)
+    
+    # Tronquer si trop long
+    full_name = asset_name  # Garder le nom complet pour le tooltip
+    if len(asset_name) > 18:
+        asset_name = asset_name[:16] + "..."
     
     if not is_loaded:
         # Ligne pour actif non chargé
@@ -28,12 +153,16 @@ def create_asset_row(asset_data, is_loaded=True):
                 style={'width': '40px'}
             ),
             html.Td(html.Strong(ticker), style={'width': '80px'}),
+            html.Td(
+                html.Small(asset_name, className="text-muted", title=full_name), 
+                style={'width': '120px', 'overflow': 'hidden', 'textOverflow': 'ellipsis', 'whiteSpace': 'nowrap'}
+            ),
             html.Td(html.Span("—", className="text-muted"), className="text-end", style={'width': '90px'}),
-            html.Td(html.Span("—", className="text-muted"), className="text-center", style={'width': '60px'}),
-            html.Td(dbc.Badge("—", color="secondary", className="me-1"), className="text-center", style={'width': '100px'}),
-            html.Td(dbc.Badge("—", color="secondary", className="me-1"), className="text-center", style={'width': '100px'}),
-            html.Td(dbc.Badge("—", color="secondary", className="me-1"), className="text-center", style={'width': '80px'}),
-            html.Td(dbc.Badge("—", color="secondary"), className="text-center", style={'width': '100px'}),
+            html.Td(html.Span("—", className="text-muted"), className="text-center", style={'width': '50px'}),
+            html.Td(dbc.Badge("—", color="secondary", className="me-1"), className="text-center", style={'width': '90px'}),
+            html.Td(dbc.Badge("—", color="secondary", className="me-1"), className="text-center", style={'width': '90px'}),
+            html.Td(dbc.Badge("—", color="secondary", className="me-1"), className="text-center", style={'width': '70px'}),
+            html.Td(dbc.Badge("—", color="secondary"), className="text-center", style={'width': '90px'}),
         ], id={'type': 'asset-row', 'index': ticker}, className="text-muted")
     
     # Données pour actif chargé
@@ -116,11 +245,8 @@ def create_asset_row(asset_data, is_loaded=True):
         rsi_color = "#6c757d"
         rsi_display = "N/A"
     
-    # Prix
-    if current_price is not None and current_price != 0:
-        price_display = f"${current_price:.2f}"
-    else:
-        price_display = "N/A"
+    # Prix avec la bonne devise
+    price_display = format_price_with_currency(current_price, ticker)
     
     return html.Tr([
         html.Td(
@@ -133,16 +259,20 @@ def create_asset_row(asset_data, is_loaded=True):
             style={'width': '40px'}
         ),
         html.Td(html.Strong(ticker), style={'width': '80px'}),
+        html.Td(
+            html.Small(asset_name, className="text-muted", title=full_name), 
+            style={'width': '120px', 'overflow': 'hidden', 'textOverflow': 'ellipsis', 'whiteSpace': 'nowrap'}
+        ),
         html.Td(price_display, className="text-end", style={'width': '90px'}),
         html.Td(
             html.Span(rsi_display, style={'color': rsi_color, 'fontWeight': 'bold'}),
             className="text-center",
-            style={'width': '60px'}
+            style={'width': '50px'}
         ),
-        html.Td(div_badge, className="text-center", style={'width': '100px'}),
-        html.Td(date_badge, className="text-center", style={'width': '100px'}),
-        html.Td(last_type_badge, className="text-center", style={'width': '80px'}),
-        html.Td(reco_badge, className="text-center", style={'width': '100px'}),
+        html.Td(div_badge, className="text-center", style={'width': '90px'}),
+        html.Td(date_badge, className="text-center", style={'width': '90px'}),
+        html.Td(last_type_badge, className="text-center", style={'width': '70px'}),
+        html.Td(reco_badge, className="text-center", style={'width': '90px'}),
     ], id={'type': 'asset-row', 'index': ticker})
 
 
@@ -163,13 +293,14 @@ def create_category_table(category_key, assets_data, is_loaded=True):
     table = dbc.Table([
         html.Thead(html.Tr([
             html.Th("", style={'width': '40px'}),
-            html.Th("Actif", style={'width': '80px'}),
+            html.Th("Ticker", style={'width': '80px'}),
+            html.Th("Nom", style={'width': '120px'}),
             html.Th("Prix", className="text-end", style={'width': '90px'}),
-            html.Th("RSI", className="text-center", style={'width': '60px'}),
-            html.Th("Div. RSI", className="text-center", style={'width': '100px'}),
-            html.Th("Dernière Div.", className="text-center", style={'width': '100px'}),
-            html.Th("Type", className="text-center", style={'width': '80px'}),
-            html.Th("Reco.", className="text-center", style={'width': '100px'}),
+            html.Th("RSI", className="text-center", style={'width': '50px'}),
+            html.Th("Div. RSI", className="text-center", style={'width': '90px'}),
+            html.Th("Dernière", className="text-center", style={'width': '90px'}),
+            html.Th("Type", className="text-center", style={'width': '70px'}),
+            html.Th("Reco.", className="text-center", style={'width': '90px'}),
         ]), style={'backgroundColor': '#1a1d20'}),
         html.Tbody(rows)
     ], bordered=True, color="dark", hover=True, size="sm", responsive=True, className="mb-0")
@@ -216,10 +347,23 @@ def create_assets_summary_table(summary_data, assets_list=None):
     # Créer les sections collapsibles par catégorie
     accordion_items = []
     
-    # Trier les catégories par nombre d'actifs (décroissant) puis par nom
+    # Ordre de priorité des catégories
+    category_order = [
+        'crypto_eur', 'forex_eur', 'precious_metals_eur',
+        'blue_chip_eur', 'blue_chip_us', 'tech_volatile_us',
+        'indices', 'precious_metals', 'crypto', 'etf_sector', 'commodities', 'custom'
+    ]
+    
+    # Trier les catégories selon l'ordre défini
+    def get_category_order(cat):
+        try:
+            return category_order.index(cat)
+        except ValueError:
+            return len(category_order)
+    
     sorted_categories = sorted(
         categories_data.keys(),
-        key=lambda c: (-len(categories_data[c]), c)
+        key=lambda c: (get_category_order(c), c)
     )
     
     for category_key in sorted_categories:
@@ -228,8 +372,8 @@ def create_assets_summary_table(summary_data, assets_list=None):
         
         # Compter les divergences dans cette catégorie
         if summary_data:
-            num_bullish = sum(1 for a in cat_assets if a.get('rsi_divergence') == 'bullish')
-            num_bearish = sum(1 for a in cat_assets if a.get('rsi_divergence') == 'bearish')
+            num_bullish = sum(1 for a in cat_assets if isinstance(a, dict) and a.get('rsi_divergence') == 'bullish')
+            num_bearish = sum(1 for a in cat_assets if isinstance(a, dict) and a.get('rsi_divergence') == 'bearish')
             is_loaded = True
         else:
             num_bullish = 0
@@ -237,26 +381,22 @@ def create_assets_summary_table(summary_data, assets_list=None):
             is_loaded = False
         
         # Créer le titre de l'accordéon avec badges
-        title_content = html.Div([
-            html.Span(cat_info['icon'], className="me-2", style={'fontSize': '1.2em'}),
-            html.Span(cat_info['name'], className="fw-bold me-2"),
+        badges = [
             dbc.Badge(f"{len(cat_assets)} actifs", color="info", className="me-2"),
-        ], className="d-flex align-items-center")
+        ]
         
         # Ajouter les badges de divergence si chargé
         if is_loaded:
-            badges = []
             if num_bullish > 0:
                 badges.append(dbc.Badge(f"🟢 {num_bullish}", color="success", className="me-1"))
             if num_bearish > 0:
                 badges.append(dbc.Badge(f"🔴 {num_bearish}", color="danger", className="me-1"))
-            
-            title_content = html.Div([
-                html.Span(cat_info['icon'], className="me-2", style={'fontSize': '1.2em'}),
-                html.Span(cat_info['name'], className="fw-bold me-2"),
-                dbc.Badge(f"{len(cat_assets)} actifs", color="info", className="me-2"),
-                *badges
-            ], className="d-flex align-items-center")
+        
+        title_content = html.Div([
+            html.Span(cat_info['icon'], className="me-2", style={'fontSize': '1.2em'}),
+            html.Span(cat_info['name'], className="fw-bold me-2"),
+            *badges
+        ], className="d-flex align-items-center")
         
         # Créer le tableau pour cette catégorie
         table = create_category_table(category_key, cat_assets, is_loaded=is_loaded)

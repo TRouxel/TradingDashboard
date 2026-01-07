@@ -40,7 +40,8 @@ from .summary_table import (
     create_assets_summary_table,
     create_summary_section,
     create_asset_row,
-    create_category_table
+    create_category_table,
+    format_price_with_currency
 )
 from .divergence_timeline import (
     create_divergence_timeline_chart,

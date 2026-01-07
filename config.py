@@ -1,7 +1,7 @@
-# config.py - VERSION MISE À JOUR avec tous les actifs EUR
+# config.py - VERSION MISE À JOUR avec corrections devises et assets
 """
 Configuration centralisée des paramètres du modèle d'analyse technique.
-VERSION 3.2 - Liste complète des actifs EUR (Forex, Crypto, Actions, Indices)
+VERSION 3.3 - Corrections Forex EUR, Métaux EUR, réorganisation actions US
 """
 import os
 from dotenv import load_dotenv
@@ -22,6 +22,39 @@ DEFAULT_ASSETS = [
     'SXR8.DE',        # iShares S&P 500 UCITS (EUR)
     'VUAA.DE',        # Vanguard S&P 500 UCITS (EUR)
     
+    # === BLUE CHIPS US (Valeurs stables) ===
+    'AAPL',           # Apple
+    'MSFT',           # Microsoft
+    'GOOGL',          # Alphabet (Google)
+    'JNJ',            # Johnson & Johnson
+    'KO',             # Coca-Cola
+    'PG',             # Procter & Gamble
+    'PEP',            # PepsiCo
+    'MCD',            # McDonald's
+    'WMT',            # Walmart
+    'JPM',            # JPMorgan Chase
+    'V',              # Visa
+    'MA',             # Mastercard
+    'UNH',            # UnitedHealth
+    'HD',             # Home Depot
+    'DIS',            # Disney
+    
+    # === TECH VOLATILE US (Growth / Momentum) ===
+    'TSLA',           # Tesla
+    'NVDA',           # NVIDIA
+    'AMD',            # AMD
+    'AMZN',           # Amazon
+    'META',           # Meta (Facebook)
+    'NFLX',           # Netflix
+    'PLTR',           # Palantir
+    'COIN',           # Coinbase
+    'SQ',             # Block (Square)
+    'SHOP',           # Shopify
+    'ROKU',           # Roku
+    'SNOW',           # Snowflake
+    'CRWD',           # CrowdStrike
+    'DDOG',           # Datadog
+    
     # === ACTIONS EUR (Blue Chips) ===
     'AI.PA',          # Air Liquide
     'MC.PA',          # LVMH
@@ -31,29 +64,24 @@ DEFAULT_ASSETS = [
     'SAP.DE',         # SAP
     'ASML.AS',        # ASML
     
-    # === FOREX EUR - MAJEURES ===
-    'EURJPY=X',       # EUR/JPY
-    'EURGBP=X',       # EUR/GBP
-    'EURCHF=X',       # EUR/CHF
-    'EURAUD=X',       # EUR/AUD
-    'EURCAD=X',       # EUR/CAD
-    'EURNZD=X',       # EUR/NZD
+    # === FOREX - Paires vs EUR (pour portefeuille EUR) ===
+    # Format: on achète la devise cotée contre EUR, prix = combien d'EUR pour 1 unité
+    'USDEUR=X',       # USD/EUR - Dollar US
+    'AUDEUR=X',       # AUD/EUR - Dollar Australien
+    'GBPEUR=X',       # GBP/EUR - Livre Sterling
+    'CHFEUR=X',       # CHF/EUR - Franc Suisse
+    'JPYEUR=X',       # JPY/EUR - Yen (pour 1 JPY)
+    'CADEUR=X',       # CAD/EUR - Dollar Canadien
+    'NZDEUR=X',       # NZD/EUR - Dollar Néo-Zélandais
+    'SEKEUR=X',       # SEK/EUR - Couronne Suédoise
+    'NOKEUR=X',       # NOK/EUR - Couronne Norvégienne
+    'SGDEUR=X',       # SGD/EUR - Dollar Singapourien
     
-    # === FOREX EUR - SECONDAIRES ===
-    'EURSEK=X',       # EUR/SEK
-    'EURNOK=X',       # EUR/NOK
-    'EURDKK=X',       # EUR/DKK
-    'EURPLN=X',       # EUR/PLN
-    'EURHUF=X',       # EUR/HUF
-    'EURCZK=X',       # EUR/CZK
-    'EURTRY=X',       # EUR/TRY
-    'EURZAR=X',       # EUR/ZAR
-    'EURMXN=X',       # EUR/MXN
-    'EURSGD=X',       # EUR/SGD
-    'EURHKD=X',       # EUR/HKD
-    'EURCNY=X',       # EUR/CNY
-    'EURINR=X',       # EUR/INR
-    'EURKRW=X',       # EUR/KRW
+    # === MÉTAUX PRÉCIEUX EN EUR ===
+    '4GLD.DE',        # Xetra-Gold (coté en EUR)
+    'VZLE.DE',        # WisdomTree Physical Silver EUR
+    # Retirer EGLN.L, PHAU.L, PHAG.L qui sont en GBP
+    # Ou les garder si tu veux aussi suivre des métaux en GBP
     
     # === CRYPTO EUR - MAJEURES ===
     'BTC-EUR',        # Bitcoin EUR
@@ -70,18 +98,317 @@ DEFAULT_ASSETS = [
     'MATIC-EUR',      # Polygon EUR
     'UNI-EUR',        # Uniswap EUR
     'LTC-EUR',        # Litecoin EUR
-    'BCH-EUR',        # Bitcoin Cash EUR
     'ATOM-EUR',       # Cosmos EUR
     'NEAR-EUR',       # Near Protocol EUR
-    'FTM-EUR',        # Fantom EUR
-    'ALGO-EUR',       # Algorand EUR
-    'XLM-EUR',        # Stellar EUR
     'AAVE-EUR',       # Aave EUR
-    'MKR-EUR',        # Maker EUR
-    'CRV-EUR',        # Curve EUR
     'SHIB-EUR',       # Shiba Inu EUR
-    'PEPE-EUR',       # Pepe EUR
 ]
+
+# === NOMS COMPLETS DES ACTIFS (pour affichage) ===
+ASSET_NAMES = {
+    # Indices
+    '^GSPC': 'S&P 500',
+    '^DJI': 'Dow Jones',
+    '^IXIC': 'NASDAQ Composite',
+    '^NDX': 'NASDAQ 100',
+    '^STOXX50E': 'Euro Stoxx 50',
+    '^GDAXI': 'DAX',
+    '^FCHI': 'CAC 40',
+    
+    # ETF Indices
+    'IWDA.AS': 'iShares MSCI World',
+    'EUNL.DE': 'iShares MSCI World UCITS',
+    'CW8.PA': 'Amundi MSCI World',
+    'EWLD.PA': 'Lyxor MSCI World',
+    'MWRD.DE': 'Amundi MSCI World II',
+    'SXR8.DE': 'iShares S&P 500 UCITS',
+    'VUAA.DE': 'Vanguard S&P 500 UCITS',
+    'SPY': 'SPDR S&P 500',
+    'QQQ': 'Invesco NASDAQ 100',
+    'VOO': 'Vanguard S&P 500',
+    
+    # Blue Chips US
+    'AAPL': 'Apple',
+    'MSFT': 'Microsoft',
+    'GOOGL': 'Alphabet (Google)',
+    'GOOG': 'Alphabet (Google)',
+    'JNJ': 'Johnson & Johnson',
+    'JPM': 'JPMorgan Chase',
+    'V': 'Visa',
+    'MA': 'Mastercard',
+    'PG': 'Procter & Gamble',
+    'KO': 'Coca-Cola',
+    'PEP': 'PepsiCo',
+    'MCD': "McDonald's",
+    'WMT': 'Walmart',
+    'HD': 'Home Depot',
+    'DIS': 'Disney',
+    'CSCO': 'Cisco',
+    'INTC': 'Intel',
+    'VZ': 'Verizon',
+    'T': 'AT&T',
+    'IBM': 'IBM',
+    'GE': 'General Electric',
+    'BA': 'Boeing',
+    'CAT': 'Caterpillar',
+    'MMM': '3M',
+    'AXP': 'American Express',
+    'GS': 'Goldman Sachs',
+    'UNH': 'UnitedHealth',
+    'CVX': 'Chevron',
+    'XOM': 'ExxonMobil',
+    
+    # Tech Volatile US
+    'TSLA': 'Tesla',
+    'NVDA': 'NVIDIA',
+    'AMD': 'AMD',
+    'AMZN': 'Amazon',
+    'META': 'Meta (Facebook)',
+    'NFLX': 'Netflix',
+    'PLTR': 'Palantir',
+    'SQ': 'Block (Square)',
+    'SHOP': 'Shopify',
+    'ROKU': 'Roku',
+    'SNAP': 'Snap',
+    'PINS': 'Pinterest',
+    'COIN': 'Coinbase',
+    'MARA': 'Marathon Digital',
+    'RIOT': 'Riot Platforms',
+    'HOOD': 'Robinhood',
+    'RIVN': 'Rivian',
+    'LCID': 'Lucid Motors',
+    'NIO': 'NIO',
+    'XPEV': 'XPeng',
+    'LI': 'Li Auto',
+    'MU': 'Micron',
+    'MRVL': 'Marvell',
+    'AVGO': 'Broadcom',
+    'ARM': 'ARM Holdings',
+    'SMCI': 'Super Micro Computer',
+    'SNOW': 'Snowflake',
+    'CRWD': 'CrowdStrike',
+    'DDOG': 'Datadog',
+    'ZS': 'Zscaler',
+    'NET': 'Cloudflare',
+    'ABNB': 'Airbnb',
+    'UBER': 'Uber',
+    'LYFT': 'Lyft',
+    'DASH': 'DoorDash',
+    
+    # Blue Chips EUR
+    'AI.PA': 'Air Liquide',
+    'MC.PA': 'LVMH',
+    'OR.PA': "L'Oréal",
+    'SAN.PA': 'Sanofi',
+    'TTE.PA': 'TotalEnergies',
+    'BNP.PA': 'BNP Paribas',
+    'ACA.PA': 'Crédit Agricole',
+    'SU.PA': 'Schneider Electric',
+    'AIR.PA': 'Airbus',
+    'SAF.PA': 'Safran',
+    'DG.PA': 'Vinci',
+    'KER.PA': 'Kering',
+    'RI.PA': 'Pernod Ricard',
+    'CAP.PA': 'Capgemini',
+    'CS.PA': 'AXA',
+    'BN.PA': 'Danone',
+    'ENGI.PA': 'Engie',
+    'ORA.PA': 'Orange',
+    'VIV.PA': 'Vivendi',
+    'SAP.DE': 'SAP',
+    'SIE.DE': 'Siemens',
+    'ALV.DE': 'Allianz',
+    'BAS.DE': 'BASF',
+    'BAYN.DE': 'Bayer',
+    'BMW.DE': 'BMW',
+    'MBG.DE': 'Mercedes-Benz',
+    'VOW3.DE': 'Volkswagen',
+    'DTE.DE': 'Deutsche Telekom',
+    'DBK.DE': 'Deutsche Bank',
+    'MUV2.DE': 'Munich Re',
+    'ADS.DE': 'Adidas',
+    'ASML.AS': 'ASML',
+    'PHIA.AS': 'Philips',
+    'UNA.AS': 'Unilever',
+    'INGA.AS': 'ING',
+    'HEIA.AS': 'Heineken',
+    
+    # Forex EUR (inversées pour portefeuille EUR)
+    'USDEUR=X': 'Dollar US',
+    'AUDEUR=X': 'Dollar Australien',
+    'GBPEUR=X': 'Livre Sterling',
+    'CHFEUR=X': 'Franc Suisse',
+    'JPYEUR=X': 'Yen Japonais',
+    'CADEUR=X': 'Dollar Canadien',
+    'NZDEUR=X': 'Dollar Néo-Zélandais',
+    'SEKEUR=X': 'Couronne Suédoise',
+    'NOKEUR=X': 'Couronne Norvégienne',
+    'DKKEUR=X': 'Couronne Danoise',
+    'PLNEUR=X': 'Zloty Polonais',
+    'HUFEUR=X': 'Forint Hongrois',
+    'CZKEUR=X': 'Couronne Tchèque',
+    'TRYEUR=X': 'Lire Turque',
+    'ZAREUR=X': 'Rand Sud-Africain',
+    'MXNEUR=X': 'Peso Mexicain',
+    'SGDEUR=X': 'Dollar Singapourien',
+    'HKDEUR=X': 'Dollar Hong Kong',
+    'CNYEUR=X': 'Yuan Chinois',
+    'INREUR=X': 'Roupie Indienne',
+    'KRWEUR=X': 'Won Coréen',
+    # Anciennes paires (pour compatibilité)
+    'EURJPY=X': 'EUR/JPY',
+    'EURGBP=X': 'EUR/GBP',
+    'EURCHF=X': 'EUR/CHF',
+    'EURAUD=X': 'EUR/AUD',
+    'EURCAD=X': 'EUR/CAD',
+    'EURNZD=X': 'EUR/NZD',
+    'EURUSD=X': 'EUR/USD',
+    
+    # Métaux Précieux EUR
+    'EGLN.L': 'Gold ETC EUR',
+    'PHAU.L': 'Physical Gold',
+    'PHAG.L': 'Physical Silver',
+    '4GLD.DE': 'Xetra-Gold',
+    'VZLE.DE': 'Silver EUR',
+    'PPLT': 'Physical Platinum',
+    'GC=F': 'Gold Futures',
+    'SI=F': 'Silver Futures',
+    'PL=F': 'Platinum Futures',
+    'PA=F': 'Palladium Futures',
+    'GLD': 'SPDR Gold',
+    'SLV': 'iShares Silver',
+    'IAU': 'iShares Gold',
+    
+    # Crypto EUR
+    'BTC-EUR': 'Bitcoin',
+    'ETH-EUR': 'Ethereum',
+    'SOL-EUR': 'Solana',
+    'XRP-EUR': 'Ripple (XRP)',
+    'ADA-EUR': 'Cardano',
+    'DOGE-EUR': 'Dogecoin',
+    'DOT-EUR': 'Polkadot',
+    'LINK-EUR': 'Chainlink',
+    'AVAX-EUR': 'Avalanche',
+    'MATIC-EUR': 'Polygon',
+    'UNI-EUR': 'Uniswap',
+    'LTC-EUR': 'Litecoin',
+    'BCH-EUR': 'Bitcoin Cash',
+    'ATOM-EUR': 'Cosmos',
+    'NEAR-EUR': 'Near Protocol',
+    'FTM-EUR': 'Fantom',
+    'ALGO-EUR': 'Algorand',
+    'XLM-EUR': 'Stellar',
+    'AAVE-EUR': 'Aave',
+    'MKR-EUR': 'Maker',
+    'CRV-EUR': 'Curve',
+    'SHIB-EUR': 'Shiba Inu',
+    'PEPE-EUR': 'Pepe',
+    
+    # Crypto USD
+    'BTC-USD': 'Bitcoin',
+    'ETH-USD': 'Ethereum',
+    'SOL-USD': 'Solana',
+    'XRP-USD': 'Ripple (XRP)',
+    'ADA-USD': 'Cardano',
+    'DOGE-USD': 'Dogecoin',
+}
+
+# === DEVISES PAR ASSET ===
+def get_asset_currency(ticker):
+    """Retourne la devise d'un actif."""
+    ticker = ticker.upper()
+    
+    # Crypto EUR
+    if '-EUR' in ticker:
+        return 'EUR'
+    
+    # Crypto USD
+    if '-USD' in ticker:
+        return 'USD'
+    
+    # Forex - la devise de cotation
+    if '=X' in ticker:
+        # Format XXXYYY=X -> cotation en YYY
+        pair = ticker.replace('=X', '')
+        if len(pair) == 6:
+            return pair[3:6]
+        return 'USD'
+    
+    # ETC/ETF métaux précieux - CORRECTION
+    # Les ETC cotés à Londres (.L) sont en GBP sauf indication contraire
+    gbp_etcs = ['EGLN.L', 'PHAU.L', 'PHAG.L', 'SGLN.L', 'SSLN.L']
+    if ticker in gbp_etcs:
+        return 'GBP'
+    
+    # ETC cotés en EUR (Xetra, etc.)
+    eur_etcs = ['4GLD.DE', 'VZLE.DE', 'EWG2.DE', 'PPFB.DE']
+    if ticker in eur_etcs:
+        return 'EUR'
+    
+    # Actions européennes par extension
+    if ticker.endswith('.PA') or ticker.endswith('.DE') or ticker.endswith('.AS'):
+        return 'EUR'
+    if ticker.endswith('.L'):
+        return 'GBP'  # Par défaut pour Londres
+    if ticker.endswith('.MI'):
+        return 'EUR'
+    if ticker.endswith('.MC'):
+        return 'EUR'
+    
+    # ETF européens connus (cotés en EUR)
+    eur_etfs = ['IWDA.AS', 'EUNL.DE', 'CW8.PA', 'EWLD.PA', 'MWRD.DE', 'SXR8.DE', 
+                'VUAA.DE', 'EXSA.DE', 'MEUD.PA']
+    if ticker in eur_etfs:
+        return 'EUR'
+    
+    # Futures
+    if '=F' in ticker:
+        return 'USD'
+    
+    # Indices
+    if ticker.startswith('^'):
+        if ticker in ['^GDAXI', '^FCHI', '^STOXX50E', '^AEX']:
+            return 'EUR'
+        if ticker == '^FTSE':
+            return 'GBP'
+        return 'USD'
+    
+    # Par défaut (actions US)
+    return 'USD'
+
+def get_currency_symbol(currency):
+    """Retourne le symbole d'une devise."""
+    symbols = {
+        'EUR': '€',
+        'USD': '$',
+        'GBP': '£',
+        'JPY': '¥',
+        'CHF': 'CHF',
+        'AUD': 'A$',
+        'CAD': 'C$',
+        'NZD': 'NZ$',
+        'SEK': 'kr',
+        'NOK': 'kr',
+        'DKK': 'kr',
+        'PLN': 'zł',
+        'HUF': 'Ft',
+        'CZK': 'Kč',
+        'TRY': '₺',
+        'ZAR': 'R',
+        'MXN': '$',
+        'SGD': 'S$',
+        'HKD': 'HK$',
+        'CNY': '¥',
+        'INR': '₹',
+        'KRW': '₩',
+    }
+    return symbols.get(currency, currency)
+
+
+def get_asset_name(ticker):
+    """Retourne le nom complet d'un actif."""
+    return ASSET_NAMES.get(ticker.upper(), ticker)
+
 
 # === ÉCHELLE DE TEMPS POUR LES SIGNAUX ===
 SIGNAL_TIMEFRAME = {
@@ -265,10 +592,10 @@ OPTIONAL_FILTERS = {
 # ============================================================
 
 ASSET_CATEGORIES = {
-    'blue_chip': {
-        'name': 'Blue Chip',
-        'description': 'Actions stables de grandes entreprises (AAPL, MSFT, JNJ, KO, MCD...)',
-        'icon': '🏛️',
+    'blue_chip_us': {
+        'name': 'Blue Chip US',
+        'description': 'Actions US stables (Apple, Microsoft, Coca-Cola, J&J...)',
+        'icon': '🇺🇸',
         'color': '#0d6efd',
         'weight_modifiers': {
             'rsi_divergence': 1.3,
@@ -296,41 +623,10 @@ ASSET_CATEGORIES = {
         }
     },
     
-    'blue_chip_eur': {
-        'name': 'Blue Chip EUR',
-        'description': 'Actions européennes stables (AI.PA, MC.PA, SAN.PA...)',
-        'icon': '🇪🇺',
-        'color': '#003399',
-        'weight_modifiers': {
-            'rsi_divergence': 1.3,
-            'trend_strong': 1.4,
-            'trend_weak': 1.2,
-            'pattern_signal': 1.1,
-            'rsi_extreme': 1.0,
-            'macd_cross': 1.1,
-            'bollinger_touch': 1.2,
-        },
-        'combination_modifiers': {
-            'divergence_bullish_stoch': 1.2,
-            'divergence_bearish_stoch': 1.2,
-            'macd_bullish_trend_bullish': 1.3,
-            'macd_bearish_trend_bearish': 1.3,
-        },
-        'decision_modifiers': {
-            'min_conviction_threshold': 2.5,
-            'conviction_difference': 0.5,
-            'against_trend_penalty': 0.6,
-        },
-        'rsi_thresholds': {
-            'oversold': 30,
-            'overbought': 70,
-        }
-    },
-    
-    'tech_volatile': {
-        'name': 'Tech Volatile',
-        'description': 'Actions tech à forte volatilité (TSLA, NVDA, AMD, PLTR...)',
-        'icon': '⚡',
+    'tech_volatile_us': {
+        'name': 'Tech Volatile US',
+        'description': 'Tech US à forte volatilité (Tesla, NVIDIA, AMD, Amazon, Meta...)',
+        'icon': '⚡🇺🇸',
         'color': '#6f42c1',
         'weight_modifiers': {
             'rsi_divergence': 0.8,
@@ -360,6 +656,37 @@ ASSET_CATEGORIES = {
         'rsi_thresholds': {
             'oversold': 25,
             'overbought': 75,
+        }
+    },
+    
+    'blue_chip_eur': {
+        'name': 'Blue Chip EUR',
+        'description': 'Actions européennes stables (LVMH, Air Liquide, SAP...)',
+        'icon': '🇪🇺',
+        'color': '#003399',
+        'weight_modifiers': {
+            'rsi_divergence': 1.3,
+            'trend_strong': 1.4,
+            'trend_weak': 1.2,
+            'pattern_signal': 1.1,
+            'rsi_extreme': 1.0,
+            'macd_cross': 1.1,
+            'bollinger_touch': 1.2,
+        },
+        'combination_modifiers': {
+            'divergence_bullish_stoch': 1.2,
+            'divergence_bearish_stoch': 1.2,
+            'macd_bullish_trend_bullish': 1.3,
+            'macd_bearish_trend_bearish': 1.3,
+        },
+        'decision_modifiers': {
+            'min_conviction_threshold': 2.5,
+            'conviction_difference': 0.5,
+            'against_trend_penalty': 0.6,
+        },
+        'rsi_thresholds': {
+            'oversold': 30,
+            'overbought': 70,
         }
     },
     
@@ -439,46 +766,10 @@ ASSET_CATEGORIES = {
         }
     },
     
-    'forex': {
-        'name': 'Forex USD',
-        'description': 'Paires de devises vs USD (EURUSD=X, GBPUSD=X...)',
-        'icon': '💱',
-        'color': '#20c997',
-        'weight_modifiers': {
-            'rsi_divergence': 1.4,
-            'trend_strong': 1.2,
-            'trend_weak': 1.0,
-            'pattern_signal': 1.2,
-            'rsi_extreme': 1.1,
-            'stoch_cross': 1.4,
-            'stoch_extreme': 1.2,
-            'macd_cross': 1.1,
-            'bollinger_touch': 1.5,
-            'bollinger_zone': 1.3,
-        },
-        'combination_modifiers': {
-            'bollinger_low_rsi_low': 1.4,
-            'bollinger_high_rsi_high': 1.4,
-            'bollinger_low_stoch_bullish': 1.4,
-            'bollinger_high_stoch_bearish': 1.4,
-            'rsi_low_stoch_bullish': 1.3,
-            'rsi_high_stoch_bearish': 1.3,
-        },
-        'decision_modifiers': {
-            'min_conviction_threshold': 2.0,
-            'conviction_difference': 0.4,
-            'against_trend_penalty': 0.5,
-        },
-        'rsi_thresholds': {
-            'oversold': 30,
-            'overbought': 70,
-        }
-    },
-    
     'forex_eur': {
-        'name': 'Forex EUR',
-        'description': 'Paires de devises vs EUR (EURJPY=X, EURGBP=X, EURCHF=X...)',
-        'icon': '🇪🇺💱',
+        'name': 'Forex vs EUR',
+        'description': 'Devises vs EUR pour portefeuille EUR (USD, AUD, GBP...)',
+        'icon': '💱🇪🇺',
         'color': '#17a2b8',
         'weight_modifiers': {
             'rsi_divergence': 1.4,
@@ -511,11 +802,42 @@ ASSET_CATEGORIES = {
         }
     },
     
-    'precious_metals': {
-        'name': 'Métaux Précieux',
-        'description': 'Or, Argent, Platine (GC=F, SI=F, PL=F, GLD, SLV...)',
-        'icon': '🥇',
+    'precious_metals_eur': {
+        'name': 'Métaux Précieux EUR',
+        'description': 'Or, Argent cotés en EUR (4GLD.DE, VZLE.DE...)',
+        'icon': '🥇🇪🇺',
         'color': '#ffc107',
+        'weight_modifiers': {
+            'rsi_divergence': 1.4,
+            'trend_strong': 1.5,
+            'trend_weak': 1.1,
+            'pattern_signal': 1.0,
+            'rsi_extreme': 1.0,
+            'macd_cross': 1.2,
+            'bollinger_touch': 1.1,
+        },
+        'combination_modifiers': {
+            'divergence_bullish_stoch': 1.3,
+            'divergence_bearish_stoch': 1.3,
+            'macd_bullish_trend_bullish': 1.3,
+            'macd_bearish_trend_bearish': 1.3,
+        },
+        'decision_modifiers': {
+            'min_conviction_threshold': 2.5,
+            'conviction_difference': 0.5,
+            'against_trend_penalty': 0.6,
+        },
+        'rsi_thresholds': {
+            'oversold': 30,
+            'overbought': 70,
+        }
+    },
+    
+    'precious_metals': {
+        'name': 'Métaux Précieux USD',
+        'description': 'Or, Argent, Platine en USD (GC=F, SI=F, GLD...)',
+        'icon': '🥇',
+        'color': '#d4af37',
         'weight_modifiers': {
             'rsi_divergence': 1.4,
             'trend_strong': 1.5,
@@ -544,7 +866,7 @@ ASSET_CATEGORIES = {
     
     'indices': {
         'name': 'Indices',
-        'description': 'Indices boursiers (^GSPC, ^DJI, SPY, QQQ, IWDA.AS...)',
+        'description': 'Indices boursiers (S&P 500, NASDAQ, DAX, CAC 40...)',
         'icon': '📊',
         'color': '#198754',
         'weight_modifiers': {
@@ -577,7 +899,7 @@ ASSET_CATEGORIES = {
     
     'etf_sector': {
         'name': 'ETF Sectoriels',
-        'description': 'ETF sectoriels et thématiques (XLF, XLE, XLK, ARKK...)',
+        'description': 'ETF sectoriels et thématiques',
         'icon': '📦',
         'color': '#6c757d',
         'weight_modifiers': {
@@ -606,7 +928,7 @@ ASSET_CATEGORIES = {
     
     'commodities': {
         'name': 'Matières Premières',
-        'description': 'Pétrole, Gaz, Blé, etc. (CL=F, NG=F, ZW=F...)',
+        'description': 'Pétrole, Gaz, Blé, etc.',
         'icon': '🛢️',
         'color': '#dc3545',
         'weight_modifiers': {
@@ -660,86 +982,55 @@ KNOWN_TICKERS = {
     # ============================================================
     # BLUE CHIPS US
     # ============================================================
-    'AAPL': 'blue_chip', 'MSFT': 'blue_chip', 'GOOGL': 'blue_chip', 'GOOG': 'blue_chip',
-    'AMZN': 'blue_chip', 'META': 'blue_chip', 'JNJ': 'blue_chip', 'JPM': 'blue_chip',
-    'V': 'blue_chip', 'MA': 'blue_chip', 'PG': 'blue_chip', 'KO': 'blue_chip',
-    'PEP': 'blue_chip', 'MCD': 'blue_chip', 'WMT': 'blue_chip', 'HD': 'blue_chip',
-    'DIS': 'blue_chip', 'NFLX': 'blue_chip', 'CSCO': 'blue_chip', 'INTC': 'blue_chip',
-    'VZ': 'blue_chip', 'T': 'blue_chip', 'IBM': 'blue_chip', 'GE': 'blue_chip',
-    'BA': 'blue_chip', 'CAT': 'blue_chip', 'MMM': 'blue_chip', 'AXP': 'blue_chip',
-    'GS': 'blue_chip', 'UNH': 'blue_chip', 'CVX': 'blue_chip', 'XOM': 'blue_chip',
+    'AAPL': 'blue_chip_us', 'MSFT': 'blue_chip_us', 'GOOGL': 'blue_chip_us', 'GOOG': 'blue_chip_us',
+    'JNJ': 'blue_chip_us', 'JPM': 'blue_chip_us',
+    'V': 'blue_chip_us', 'MA': 'blue_chip_us', 'PG': 'blue_chip_us', 'KO': 'blue_chip_us',
+    'PEP': 'blue_chip_us', 'MCD': 'blue_chip_us', 'WMT': 'blue_chip_us', 'HD': 'blue_chip_us',
+    'DIS': 'blue_chip_us', 'CSCO': 'blue_chip_us', 'INTC': 'blue_chip_us',
+    'VZ': 'blue_chip_us', 'T': 'blue_chip_us', 'IBM': 'blue_chip_us', 'GE': 'blue_chip_us',
+    'BA': 'blue_chip_us', 'CAT': 'blue_chip_us', 'MMM': 'blue_chip_us', 'AXP': 'blue_chip_us',
+    'GS': 'blue_chip_us', 'UNH': 'blue_chip_us', 'CVX': 'blue_chip_us', 'XOM': 'blue_chip_us',
+    'BRK-B': 'blue_chip_us', 'BRK.B': 'blue_chip_us',
+    
+    # ============================================================
+    # TECH VOLATILE US (Growth / Momentum)
+    # ============================================================
+    'TSLA': 'tech_volatile_us', 'NVDA': 'tech_volatile_us', 'AMD': 'tech_volatile_us',
+    'AMZN': 'tech_volatile_us', 'META': 'tech_volatile_us', 'NFLX': 'tech_volatile_us',
+    'PLTR': 'tech_volatile_us', 'SQ': 'tech_volatile_us', 'SHOP': 'tech_volatile_us',
+    'ROKU': 'tech_volatile_us', 'SNAP': 'tech_volatile_us', 'PINS': 'tech_volatile_us',
+    'COIN': 'tech_volatile_us', 'MARA': 'tech_volatile_us', 'RIOT': 'tech_volatile_us',
+    'HOOD': 'tech_volatile_us', 'RIVN': 'tech_volatile_us', 'LCID': 'tech_volatile_us',
+    'NIO': 'tech_volatile_us', 'XPEV': 'tech_volatile_us', 'LI': 'tech_volatile_us',
+    'ARKK': 'tech_volatile_us', 'ARKG': 'tech_volatile_us', 'ARKF': 'tech_volatile_us',
+    'SOXL': 'tech_volatile_us', 'TQQQ': 'tech_volatile_us', 'UPRO': 'tech_volatile_us',
+    'MU': 'tech_volatile_us', 'MRVL': 'tech_volatile_us', 'AVGO': 'tech_volatile_us',
+    'ARM': 'tech_volatile_us', 'SMCI': 'tech_volatile_us',
+    'SNOW': 'tech_volatile_us', 'CRWD': 'tech_volatile_us', 'DDOG': 'tech_volatile_us',
+    'ZS': 'tech_volatile_us', 'NET': 'tech_volatile_us',
+    'ABNB': 'tech_volatile_us', 'UBER': 'tech_volatile_us', 'LYFT': 'tech_volatile_us',
+    'DASH': 'tech_volatile_us', 'RBLX': 'tech_volatile_us', 'U': 'tech_volatile_us',
     
     # ============================================================
     # BLUE CHIPS EUROPÉENNES (EUR)
     # ============================================================
-    # France (Euronext Paris - .PA)
-    'AI.PA': 'blue_chip_eur',      # Air Liquide
-    'MC.PA': 'blue_chip_eur',      # LVMH
-    'OR.PA': 'blue_chip_eur',      # L'Oréal
-    'SAN.PA': 'blue_chip_eur',     # Sanofi
-    'TTE.PA': 'blue_chip_eur',     # TotalEnergies
-    'BNP.PA': 'blue_chip_eur',     # BNP Paribas
-    'ACA.PA': 'blue_chip_eur',     # Crédit Agricole
-    'SU.PA': 'blue_chip_eur',      # Schneider Electric
-    'AIR.PA': 'blue_chip_eur',     # Airbus
-    'SAF.PA': 'blue_chip_eur',     # Safran
-    'DG.PA': 'blue_chip_eur',      # Vinci
-    'KER.PA': 'blue_chip_eur',     # Kering
-    'RI.PA': 'blue_chip_eur',      # Pernod Ricard
-    'CAP.PA': 'blue_chip_eur',     # Capgemini
-    'CS.PA': 'blue_chip_eur',      # AXA
-    'BN.PA': 'blue_chip_eur',      # Danone
-    'ENGI.PA': 'blue_chip_eur',    # Engie
-    'ORA.PA': 'blue_chip_eur',     # Orange
-    'VIV.PA': 'blue_chip_eur',     # Vivendi
-    
-    # Allemagne (Xetra - .DE)
-    'SAP.DE': 'blue_chip_eur',     # SAP
-    'SIE.DE': 'blue_chip_eur',     # Siemens
-    'ALV.DE': 'blue_chip_eur',     # Allianz
-    'BAS.DE': 'blue_chip_eur',     # BASF
-    'BAYN.DE': 'blue_chip_eur',    # Bayer
-    'BMW.DE': 'blue_chip_eur',     # BMW
-    'MBG.DE': 'blue_chip_eur',     # Mercedes-Benz
-    'VOW3.DE': 'blue_chip_eur',    # Volkswagen
-    'DTE.DE': 'blue_chip_eur',     # Deutsche Telekom
-    'DBK.DE': 'blue_chip_eur',     # Deutsche Bank
-    'MUV2.DE': 'blue_chip_eur',    # Munich Re
-    'ADS.DE': 'blue_chip_eur',     # Adidas
-    
-    # Pays-Bas (Euronext Amsterdam - .AS)
-    'ASML.AS': 'blue_chip_eur',    # ASML
-    'PHIA.AS': 'blue_chip_eur',    # Philips
-    'UNA.AS': 'blue_chip_eur',     # Unilever
-    'INGA.AS': 'blue_chip_eur',    # ING
-    'HEIA.AS': 'blue_chip_eur',    # Heineken
-    
-    # Espagne (.MC)
-    'SAN.MC': 'blue_chip_eur',     # Santander
-    'BBVA.MC': 'blue_chip_eur',    # BBVA
-    'ITX.MC': 'blue_chip_eur',     # Inditex (Zara)
-    'IBE.MC': 'blue_chip_eur',     # Iberdrola
-    'TEF.MC': 'blue_chip_eur',     # Telefonica
-    
-    # Italie (.MI)
-    'ENI.MI': 'blue_chip_eur',     # Eni
-    'ENEL.MI': 'blue_chip_eur',    # Enel
-    'ISP.MI': 'blue_chip_eur',     # Intesa Sanpaolo
-    'UCG.MI': 'blue_chip_eur',     # UniCredit
-    
-    # ============================================================
-    # TECH VOLATILE
-    # ============================================================
-    'TSLA': 'tech_volatile', 'NVDA': 'tech_volatile', 'AMD': 'tech_volatile',
-    'PLTR': 'tech_volatile', 'SQ': 'tech_volatile', 'SHOP': 'tech_volatile',
-    'ROKU': 'tech_volatile', 'SNAP': 'tech_volatile', 'PINS': 'tech_volatile',
-    'COIN': 'tech_volatile', 'MARA': 'tech_volatile', 'RIOT': 'tech_volatile',
-    'HOOD': 'tech_volatile', 'RIVN': 'tech_volatile', 'LCID': 'tech_volatile',
-    'NIO': 'tech_volatile', 'XPEV': 'tech_volatile', 'LI': 'tech_volatile',
-    'ARKK': 'tech_volatile', 'ARKG': 'tech_volatile', 'ARKF': 'tech_volatile',
-    'SOXL': 'tech_volatile', 'TQQQ': 'tech_volatile', 'UPRO': 'tech_volatile',
-    'MU': 'tech_volatile', 'MRVL': 'tech_volatile', 'AVGO': 'tech_volatile',
-    'ARM': 'tech_volatile', 'SMCI': 'tech_volatile',
+    'AI.PA': 'blue_chip_eur', 'MC.PA': 'blue_chip_eur', 'OR.PA': 'blue_chip_eur',
+    'SAN.PA': 'blue_chip_eur', 'TTE.PA': 'blue_chip_eur', 'BNP.PA': 'blue_chip_eur',
+    'ACA.PA': 'blue_chip_eur', 'SU.PA': 'blue_chip_eur', 'AIR.PA': 'blue_chip_eur',
+    'SAF.PA': 'blue_chip_eur', 'DG.PA': 'blue_chip_eur', 'KER.PA': 'blue_chip_eur',
+    'RI.PA': 'blue_chip_eur', 'CAP.PA': 'blue_chip_eur', 'CS.PA': 'blue_chip_eur',
+    'BN.PA': 'blue_chip_eur', 'ENGI.PA': 'blue_chip_eur', 'ORA.PA': 'blue_chip_eur',
+    'VIV.PA': 'blue_chip_eur',
+    'SAP.DE': 'blue_chip_eur', 'SIE.DE': 'blue_chip_eur', 'ALV.DE': 'blue_chip_eur',
+    'BAS.DE': 'blue_chip_eur', 'BAYN.DE': 'blue_chip_eur', 'BMW.DE': 'blue_chip_eur',
+    'MBG.DE': 'blue_chip_eur', 'VOW3.DE': 'blue_chip_eur', 'DTE.DE': 'blue_chip_eur',
+    'DBK.DE': 'blue_chip_eur', 'MUV2.DE': 'blue_chip_eur', 'ADS.DE': 'blue_chip_eur',
+    'ASML.AS': 'blue_chip_eur', 'PHIA.AS': 'blue_chip_eur', 'UNA.AS': 'blue_chip_eur',
+    'INGA.AS': 'blue_chip_eur', 'HEIA.AS': 'blue_chip_eur',
+    'SAN.MC': 'blue_chip_eur', 'BBVA.MC': 'blue_chip_eur', 'ITX.MC': 'blue_chip_eur',
+    'IBE.MC': 'blue_chip_eur', 'TEF.MC': 'blue_chip_eur',
+    'ENI.MI': 'blue_chip_eur', 'ENEL.MI': 'blue_chip_eur', 'ISP.MI': 'blue_chip_eur',
+    'UCG.MI': 'blue_chip_eur',
     
     # ============================================================
     # CRYPTO VS USD
@@ -749,135 +1040,74 @@ KNOWN_TICKERS = {
     'DOT-USD': 'crypto', 'LINK-USD': 'crypto', 'AVAX-USD': 'crypto',
     'MATIC-USD': 'crypto', 'UNI-USD': 'crypto', 'ATOM-USD': 'crypto',
     'LTC-USD': 'crypto', 'BCH-USD': 'crypto', 'NEAR-USD': 'crypto',
-    'APT-USD': 'crypto', 'ARB-USD': 'crypto', 'OP-USD': 'crypto',
-    'BNB-USD': 'crypto', 'TRX-USD': 'crypto', 'SHIB-USD': 'crypto',
-    'FTM-USD': 'crypto', 'ALGO-USD': 'crypto', 'XLM-USD': 'crypto',
-    'VET-USD': 'crypto', 'HBAR-USD': 'crypto', 'ICP-USD': 'crypto',
-    'FIL-USD': 'crypto', 'AAVE-USD': 'crypto', 'MKR-USD': 'crypto',
-    'CRV-USD': 'crypto', 'LDO-USD': 'crypto', 'RPL-USD': 'crypto',
-    'PEPE-USD': 'crypto', 'WIF-USD': 'crypto', 'BONK-USD': 'crypto',
     
     # ============================================================
-    # CRYPTO VS EUR (pour trading depuis compte EUR)
+    # CRYPTO VS EUR
     # ============================================================
-    'BTC-EUR': 'crypto_eur',       # Bitcoin
-    'ETH-EUR': 'crypto_eur',       # Ethereum
-    'SOL-EUR': 'crypto_eur',       # Solana
-    'XRP-EUR': 'crypto_eur',       # Ripple
-    'ADA-EUR': 'crypto_eur',       # Cardano
-    'DOGE-EUR': 'crypto_eur',      # Dogecoin
-    'DOT-EUR': 'crypto_eur',       # Polkadot
-    'LINK-EUR': 'crypto_eur',      # Chainlink
-    'AVAX-EUR': 'crypto_eur',      # Avalanche
-    'MATIC-EUR': 'crypto_eur',     # Polygon
-    'UNI-EUR': 'crypto_eur',       # Uniswap
-    'LTC-EUR': 'crypto_eur',       # Litecoin
-    'BCH-EUR': 'crypto_eur',       # Bitcoin Cash
-    'ATOM-EUR': 'crypto_eur',      # Cosmos
-    'NEAR-EUR': 'crypto_eur',      # Near Protocol
-    'FTM-EUR': 'crypto_eur',       # Fantom
-    'ALGO-EUR': 'crypto_eur',      # Algorand
-    'XLM-EUR': 'crypto_eur',       # Stellar
-    'AAVE-EUR': 'crypto_eur',      # Aave
-    'MKR-EUR': 'crypto_eur',       # Maker
-    'CRV-EUR': 'crypto_eur',       # Curve
-    'SHIB-EUR': 'crypto_eur',      # Shiba Inu
-    'PEPE-EUR': 'crypto_eur',      # Pepe
+    'BTC-EUR': 'crypto_eur', 'ETH-EUR': 'crypto_eur', 'SOL-EUR': 'crypto_eur',
+    'XRP-EUR': 'crypto_eur', 'ADA-EUR': 'crypto_eur', 'DOGE-EUR': 'crypto_eur',
+    'DOT-EUR': 'crypto_eur', 'LINK-EUR': 'crypto_eur', 'AVAX-EUR': 'crypto_eur',
+    'MATIC-EUR': 'crypto_eur', 'UNI-EUR': 'crypto_eur', 'LTC-EUR': 'crypto_eur',
+    'BCH-EUR': 'crypto_eur', 'ATOM-EUR': 'crypto_eur', 'NEAR-EUR': 'crypto_eur',
+    'FTM-EUR': 'crypto_eur', 'ALGO-EUR': 'crypto_eur', 'XLM-EUR': 'crypto_eur',
+    'AAVE-EUR': 'crypto_eur', 'MKR-EUR': 'crypto_eur', 'CRV-EUR': 'crypto_eur',
+    'SHIB-EUR': 'crypto_eur', 'PEPE-EUR': 'crypto_eur',
     
     # ============================================================
-    # FOREX VS USD (paires classiques)
+    # FOREX VS EUR (paires inversées pour portefeuille EUR)
     # ============================================================
-    'EURUSD=X': 'forex', 'GBPUSD=X': 'forex', 'USDJPY=X': 'forex',
-    'USDCHF=X': 'forex', 'AUDUSD=X': 'forex', 'USDCAD=X': 'forex',
-    'NZDUSD=X': 'forex', 'DX-Y.NYB': 'forex',
+    'USDEUR=X': 'forex_eur', 'AUDEUR=X': 'forex_eur', 'GBPEUR=X': 'forex_eur',
+    'CHFEUR=X': 'forex_eur', 'JPYEUR=X': 'forex_eur', 'CADEUR=X': 'forex_eur',
+    'NZDEUR=X': 'forex_eur', 'SEKEUR=X': 'forex_eur', 'NOKEUR=X': 'forex_eur',
+    'DKKEUR=X': 'forex_eur', 'PLNEUR=X': 'forex_eur', 'HUFEUR=X': 'forex_eur',
+    'CZKEUR=X': 'forex_eur', 'TRYEUR=X': 'forex_eur', 'ZAREUR=X': 'forex_eur',
+    'MXNEUR=X': 'forex_eur', 'SGDEUR=X': 'forex_eur', 'HKDEUR=X': 'forex_eur',
+    'CNYEUR=X': 'forex_eur', 'INREUR=X': 'forex_eur', 'KRWEUR=X': 'forex_eur',
+    # Anciennes paires (compatibilité)
+    'EURJPY=X': 'forex_eur', 'EURGBP=X': 'forex_eur', 'EURCHF=X': 'forex_eur',
+    'EURAUD=X': 'forex_eur', 'EURCAD=X': 'forex_eur', 'EURNZD=X': 'forex_eur',
+    'EURUSD=X': 'forex_eur',
     
     # ============================================================
-    # FOREX VS EUR (paires liquides sur Interactive Brokers)
+    # MÉTAUX PRÉCIEUX - Correction des devises
     # ============================================================
-    # Majeures EUR
-    'EURJPY=X': 'forex_eur',       # EUR/JPY - Très liquide
-    'EURGBP=X': 'forex_eur',       # EUR/GBP - Très liquide
-    'EURCHF=X': 'forex_eur',       # EUR/CHF - Très liquide
-    'EURAUD=X': 'forex_eur',       # EUR/AUD - Liquide
-    'EURCAD=X': 'forex_eur',       # EUR/CAD - Liquide
-    'EURNZD=X': 'forex_eur',       # EUR/NZD - Liquide
+    # ETCs cotés à Londres (GBP) - à mettre dans precious_metals (USD/GBP)
+    'EGLN.L': 'precious_metals',      # WisdomTree Physical Gold - GBP
+    'PHAU.L': 'precious_metals',      # Physical Gold - GBP  
+    'PHAG.L': 'precious_metals',      # Physical Silver - GBP
+    'SGLN.L': 'precious_metals',      # iShares Physical Gold - GBP
     
-    # Secondaires EUR (liquides sur IB)
-    'EURSEK=X': 'forex_eur',       # EUR/SEK - Couronne suédoise
-    'EURNOK=X': 'forex_eur',       # EUR/NOK - Couronne norvégienne
-    'EURDKK=X': 'forex_eur',       # EUR/DKK - Couronne danoise
-    'EURPLN=X': 'forex_eur',       # EUR/PLN - Zloty polonais
-    'EURHUF=X': 'forex_eur',       # EUR/HUF - Forint hongrois
-    'EURCZK=X': 'forex_eur',       # EUR/CZK - Couronne tchèque
-    'EURTRY=X': 'forex_eur',       # EUR/TRY - Lire turque
-    'EURZAR=X': 'forex_eur',       # EUR/ZAR - Rand sud-africain
-    'EURMXN=X': 'forex_eur',       # EUR/MXN - Peso mexicain
-    'EURSGD=X': 'forex_eur',       # EUR/SGD - Dollar singapourien
-    'EURHKD=X': 'forex_eur',       # EUR/HKD - Dollar Hong Kong
-    'EURCNY=X': 'forex_eur',       # EUR/CNY - Yuan chinois
-    'EURINR=X': 'forex_eur',       # EUR/INR - Roupie indienne
-    'EURKRW=X': 'forex_eur',       # EUR/KRW - Won coréen
+    # ETCs cotés en EUR (Xetra)
+    '4GLD.DE': 'precious_metals_eur', # Xetra-Gold - EUR
+    'VZLE.DE': 'precious_metals_eur', # WisdomTree Physical Silver - EUR
+    'EWG2.DE': 'precious_metals_eur', # Xetra-Gold - EUR
     
-    # ============================================================
-    # MÉTAUX PRÉCIEUX
-    # ============================================================
-    'GC=F': 'precious_metals', 'SI=F': 'precious_metals', 'PL=F': 'precious_metals',
-    'PA=F': 'precious_metals', 'GLD': 'precious_metals', 'SLV': 'precious_metals',
-    'IAU': 'precious_metals', 'PHYS': 'precious_metals', 'PSLV': 'precious_metals',
-    'GOLD': 'precious_metals', 'NEM': 'precious_metals', 'RGLD': 'precious_metals',
+    # Futures et ETF USD
+    'GC=F': 'precious_metals',        # Gold Futures - USD
+    'SI=F': 'precious_metals',        # Silver Futures - USD
+    'PL=F': 'precious_metals',        # Platinum Futures - USD
+    'PA=F': 'precious_metals',        # Palladium Futures - USD
+    'GLD': 'precious_metals',         # SPDR Gold - USD
+    'SLV': 'precious_metals',         # iShares Silver - USD
+    'IAU': 'precious_metals',         # iShares Gold - USD
+    'PPLT': 'precious_metals',        # Physical Platinum - USD
     
     # ============================================================
     # INDICES MAJEURS
     # ============================================================
-    # Indices US
-    '^GSPC': 'indices',            # S&P 500
-    '^DJI': 'indices',             # Dow Jones
-    '^IXIC': 'indices',            # NASDAQ Composite
-    '^NDX': 'indices',             # NASDAQ 100
-    '^RUT': 'indices',             # Russell 2000
-    '^VIX': 'indices',             # VIX
-    
-    # Indices Européens
-    '^STOXX50E': 'indices',        # Euro Stoxx 50
-    '^GDAXI': 'indices',           # DAX
-    '^FCHI': 'indices',            # CAC 40
-    '^FTSE': 'indices',            # FTSE 100
-    '^IBEX': 'indices',            # IBEX 35
-    '^FTSEMIB.MI': 'indices',      # FTSE MIB
-    '^AEX': 'indices',             # AEX
-    '^SSMI': 'indices',            # SMI
-    
-    # Indices Asiatiques
-    '^N225': 'indices',            # Nikkei 225
-    '^HSI': 'indices',             # Hang Seng
-    '000001.SS': 'indices',        # Shanghai Composite
-    '^TWII': 'indices',            # Taiwan
-    '^KS11': 'indices',            # KOSPI
-    '^AXJO': 'indices',            # ASX 200
-    
-    # ETF Indices US
-    'SPY': 'indices',              # SPDR S&P 500
-    'QQQ': 'indices',              # Invesco NASDAQ 100
-    'DIA': 'indices',              # SPDR Dow Jones
-    'IWM': 'indices',              # iShares Russell 2000
-    'VOO': 'indices',              # Vanguard S&P 500
-    'VTI': 'indices',              # Vanguard Total Stock Market
-    'IVV': 'indices',              # iShares S&P 500
-    
-    # ETF Indices Mondiaux (UCITS - EUR)
-    'IWDA.AS': 'indices',          # iShares MSCI World (EUR)
-    'SWDA.L': 'indices',           # iShares MSCI World (GBP)
-    'VWCE.DE': 'indices',          # Vanguard FTSE All-World (EUR)
-    'VWRL.AS': 'indices',          # Vanguard FTSE All-World (EUR)
-    'CSPX.L': 'indices',           # iShares S&P 500 UCITS (GBP)
-    'SXR8.DE': 'indices',          # iShares S&P 500 UCITS (EUR)
-    'VUAA.DE': 'indices',          # Vanguard S&P 500 UCITS (EUR)
-    'EUNL.DE': 'indices',          # iShares MSCI World UCITS (EUR)
-    'EXSA.DE': 'indices',          # iShares Euro Stoxx 50 (EUR)
-    'MEUD.PA': 'indices',          # Amundi MSCI Europe (EUR)
-    'CW8.PA': 'indices',           # Amundi MSCI World (EUR)
-    'EWLD.PA': 'indices',          # Lyxor MSCI World (EUR)
-    'MWRD.DE': 'indices',          # Amundi MSCI World II (EUR)
+    '^GSPC': 'indices', '^DJI': 'indices', '^IXIC': 'indices', '^NDX': 'indices',
+    '^RUT': 'indices', '^VIX': 'indices',
+    '^STOXX50E': 'indices', '^GDAXI': 'indices', '^FCHI': 'indices',
+    '^FTSE': 'indices', '^IBEX': 'indices', '^FTSEMIB.MI': 'indices',
+    '^AEX': 'indices', '^SSMI': 'indices',
+    '^N225': 'indices', '^HSI': 'indices', '000001.SS': 'indices',
+    'SPY': 'indices', 'QQQ': 'indices', 'DIA': 'indices', 'IWM': 'indices',
+    'VOO': 'indices', 'VTI': 'indices', 'IVV': 'indices',
+    'IWDA.AS': 'indices', 'SWDA.L': 'indices', 'VWCE.DE': 'indices',
+    'VWRL.AS': 'indices', 'CSPX.L': 'indices', 'SXR8.DE': 'indices',
+    'VUAA.DE': 'indices', 'EUNL.DE': 'indices', 'EXSA.DE': 'indices',
+    'MEUD.PA': 'indices', 'CW8.PA': 'indices', 'EWLD.PA': 'indices',
+    'MWRD.DE': 'indices',
     
     # ============================================================
     # ETF SECTORIELS
@@ -886,9 +1116,6 @@ KNOWN_TICKERS = {
     'XLV': 'etf_sector', 'XLI': 'etf_sector', 'XLY': 'etf_sector',
     'XLP': 'etf_sector', 'XLU': 'etf_sector', 'XLB': 'etf_sector',
     'XLRE': 'etf_sector', 'XLC': 'etf_sector',
-    'VGT': 'etf_sector', 'VHT': 'etf_sector', 'VNQ': 'etf_sector',
-    'SMH': 'etf_sector', 'XBI': 'etf_sector', 'IBB': 'etf_sector',
-    'KRE': 'etf_sector', 'XHB': 'etf_sector', 'ITB': 'etf_sector',
     
     # ============================================================
     # MATIÈRES PREMIÈRES
@@ -925,11 +1152,14 @@ def detect_asset_category(ticker, ticker_info=None):
         if base.isalpha() and len(base) <= 5:
             return 'crypto'
     
-    # Forex EUR (paires commençant par EUR)
+    # Forex vs EUR (nouvelles paires inversées)
     if '=X' in ticker:
-        if ticker.startswith('EUR'):
+        pair = ticker.replace('=X', '')
+        if pair.endswith('EUR'):
             return 'forex_eur'
-        return 'forex'
+        if pair.startswith('EUR'):
+            return 'forex_eur'
+        return 'forex_eur'  # Par défaut forex
     
     # Actions européennes par extension
     if ticker.endswith('.PA') or ticker.endswith('.DE') or ticker.endswith('.AS'):
@@ -937,7 +1167,10 @@ def detect_asset_category(ticker, ticker_info=None):
     if ticker.endswith('.MC') or ticker.endswith('.MI'):
         return 'blue_chip_eur'
     if ticker.endswith('.L'):
-        return 'blue_chip'
+        # Vérifier si c'est un ETC métaux
+        if any(metal in ticker.upper() for metal in ['GOLD', 'SILV', 'PLAT', 'PALL', 'PHAU', 'PHAG', 'EGLN']):
+            return 'precious_metals_eur'
+        return 'blue_chip_eur'
     
     # Futures
     if '=F' in ticker:
@@ -958,14 +1191,13 @@ def detect_asset_category(ticker, ticker_info=None):
         if quote_type == 'CRYPTOCURRENCY':
             return 'crypto_eur' if currency == 'EUR' else 'crypto'
         elif quote_type == 'CURRENCY':
-            symbol = ticker_info.get('symbol', ticker)
-            if symbol.startswith('EUR'):
-                return 'forex_eur'
-            return 'forex'
+            return 'forex_eur'
         elif quote_type == 'ETF':
             short_name = ticker_info.get('shortName', '').upper()
             if any(x in short_name for x in ['S&P 500', 'NASDAQ', 'DOW', 'RUSSELL', 'TOTAL MARKET', 'MSCI WORLD', 'FTSE']):
                 return 'indices'
+            if any(x in short_name for x in ['GOLD', 'SILVER', 'PRECIOUS']):
+                return 'precious_metals_eur' if currency == 'EUR' else 'precious_metals'
             return 'etf_sector'
         elif quote_type == 'INDEX':
             return 'indices'
@@ -976,33 +1208,31 @@ def detect_asset_category(ticker, ticker_info=None):
             return 'commodities'
         elif quote_type == 'EQUITY':
             sector = ticker_info.get('sector', '')
-            industry = ticker_info.get('industry', '')
             beta = ticker_info.get('beta', 1.0)
             market_cap = ticker_info.get('marketCap', 0)
             
+            # Actions EUR
             if currency == 'EUR':
-                if market_cap and market_cap > 10e9:
-                    return 'blue_chip_eur'
+                return 'blue_chip_eur'
             
+            # Tech volatile US
             if sector == 'Technology':
-                if beta and beta > 1.5:
-                    return 'tech_volatile'
-                elif market_cap and market_cap > 100e9:
-                    return 'blue_chip'
+                if beta and beta > 1.3:
+                    return 'tech_volatile_us'
+                elif market_cap and market_cap > 500e9:
+                    return 'blue_chip_us'
                 else:
-                    return 'tech_volatile'
+                    return 'tech_volatile_us'
             
-            if sector in ['Consumer Cyclical', 'Consumer Defensive', 'Financial Services', 'Healthcare']:
-                if market_cap and market_cap > 50e9:
-                    return 'blue_chip'
+            # Consumer / Growth volatile
+            if sector == 'Consumer Cyclical':
+                if beta and beta > 1.3:
+                    return 'tech_volatile_us'
+                return 'blue_chip_us'
             
-            if 'gold' in industry.lower() or 'precious' in industry.lower():
-                return 'precious_metals'
-            
-            if sector == 'Energy':
-                if market_cap and market_cap > 100e9:
-                    return 'blue_chip'
-                return 'commodities'
+            # Blue chips US par défaut
+            if market_cap and market_cap > 100e9:
+                return 'blue_chip_us'
     
     return 'custom'
 
@@ -1279,14 +1509,12 @@ def reset_to_default_assets():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Supprimer tous les actifs existants
         cursor.execute("DELETE FROM user_assets")
         conn.commit()
         
         cursor.close()
         conn.close()
         
-        # Sauvegarder les actifs par défaut
         return save_user_assets(DEFAULT_ASSETS)
         
     except Exception as e:
